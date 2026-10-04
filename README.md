@@ -29,6 +29,34 @@ uv run python src/vlm_report_framework/segment_videos.py
 Annotated videos (masks + boxes) are written to `output-segmented/<VIDEO_ID>/`
 (git-ignored).
 
+### 2. Extract + clean instrument detections (Part I: `I_{i,j}`)
+
+Per-frame instrument detections (CSV with class, confidence, frame, timestamp,
+bbox) — tissues (Cornea, Pupil) excluded, 10 instrument classes only:
+
+```bash
+uv run python src/vlm_report_framework/extract_instruments.py
+# -> output-instruments/<VIDEO_ID>_instruments_raw.csv (git-ignored)
+```
+
+Then clean noise and aggregate per phase subchunk:
+
+```bash
+uv run python src/vlm_report_framework/clean_instruments.py
+# -> output-instruments/<VIDEO_ID>_instruments_clean.csv  (per-detection status)
+# -> output-instruments/<VIDEO_ID>_chunk_instruments.csv  (Part I I_{i,j}: one row per chunk x instrument)
+```
+
+Cleaning is 3 layers (intrinsic evidence first; phase prior only tiers, never
+deletes): **L1** confidence floor (0.25) + tiny-box + same-frame duplicate
+removal → **L2** gap-tolerant (≤2-frame gap) track persistence, 1–2 frame
+blips kept only if conf ≥ 0.6 → **L3** class-level support (drops hallucinated
+classes, e.g. `Secondary-Knife` firing 3 frames in one video). Each phase
+segment becomes one chunk; segments > ~1 min split into ~1-min subchunks.
+Each chunk × instrument lands in one of two tiers for the teacher-VLM prompt:
+**observed** (strong evidence + phase-plausible) vs **weak** (candidate but
+not confirmed).
+
 ### Model
 
 - Ultralytics YOLO **segmentation** (`yolo-model/model.pt`, git-ignored)
@@ -40,10 +68,13 @@ Annotated videos (masks + boxes) are written to `output-segmented/<VIDEO_ID>/`
 
 ```text
 ├── src/vlm_report_framework/
-│   └── segment_videos.py   # YOLO segmentation runner (streamed inference)
+│   ├── segment_videos.py     # YOLO segmentation runner (streamed inference)
+│   ├── extract_instruments.py # per-frame instrument detections -> CSV
+│   └── clean_instruments.py  # noise cleaning + per-chunk I_{i,j} aggregation
 ├── videos/                 # input videos, git-ignored
 ├── yolo-model/             # model.pt, git-ignored
-└── output-segmented/       # annotated outputs, git-ignored
+├── output-segmented/       # annotated outputs, git-ignored
+└── output-instruments/     # raw/clean/chunk CSVs, git-ignored
 ```
 
 ## Notes

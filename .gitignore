@@ -20,6 +20,7 @@ env/
 videos/
 yolo-model/
 output-segmented/
+output-instruments/
 runs/
 *.pt
 *.mp4
