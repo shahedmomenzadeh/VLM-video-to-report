@@ -13,6 +13,20 @@ uv sync
 
 ## Usage
 
+Full pipeline (YOLO → instruments → cleaning → teacher VLM), fresh from scratch:
+
+```bash
+bash run_pipeline.sh
+```
+
+Resume after an interruption (keeps existing outputs):
+
+```bash
+RESUME=1 bash run_pipeline.sh
+```
+
+Individual stages (see sections below) can also be run by hand.
+
 ### 1. Segment videos with YOLO
 
 Place your segmentation model at `yolo-model/model.pt` and input videos under
