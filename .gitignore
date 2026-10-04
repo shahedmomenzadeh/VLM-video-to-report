@@ -1,0 +1,26 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+venv/
+env/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Project data (do NOT push: large + private)
+videos/
+yolo-model/
+output-segmented/
+runs/
+*.pt
+*.mp4
+*.avi
