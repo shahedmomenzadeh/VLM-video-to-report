@@ -21,6 +21,7 @@ videos/
 yolo-model/
 output-segmented/
 output-instruments/
+output-teacher/
 runs/
 *.pt
 *.mp4

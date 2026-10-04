@@ -57,6 +57,27 @@ Each chunk × instrument lands in one of two tiers for the teacher-VLM prompt:
 **observed** (strong evidence + phase-plausible) vs **weak** (candidate but
 not confirmed).
 
+### 3. Teacher reference reports (Part I: `R_teacher(i,j)`)
+
+The frontier VLM (`ag/gemini-3.8-flash` via OpenAI-compatible `localhost:20128/v1`)
+receives per chunk: the **MP4 subclip** (base64, single blob — never frames),
+phase label, tiered candidate instruments, and causal **memory** `M(i,j)`:
+
+```bash
+uv run python src/vlm_report_framework/teacher_reports.py --probe  # 1-chunk pipeline check
+uv run python src/vlm_report_framework/teacher_reports.py          # smoke test (4 chunks)
+uv run python src/vlm_report_framework/teacher_reports.py --all    # all chunks of the video
+```
+
+- Chunk ceiling: no send longer than **4 min** (all 25 videos' segments are
+  ≤3.24 min; typical chunk ~1 min).
+- Memory is background only (running summary ≤400 tok + verbatim previous
+  report + phase trail + instruments-seen + event flags + same-phase flag),
+  updated in the same VLM call (`report` / `memory_update` / `flags_add` JSON).
+  Prompt forbids restating background as current observation.
+- Outputs in `output-teacher/` (git-ignored): cached `clips/`, `reports/`
+  (.md + .json), `memory/` chain snapshots, master `*_teacher_reports.jsonl`.
+
 ### Model
 
 - Ultralytics YOLO **segmentation** (`yolo-model/model.pt`, git-ignored)
@@ -70,11 +91,14 @@ not confirmed).
 ├── src/vlm_report_framework/
 │   ├── segment_videos.py     # YOLO segmentation runner (streamed inference)
 │   ├── extract_instruments.py # per-frame instrument detections -> CSV
-│   └── clean_instruments.py  # noise cleaning + per-chunk I_{i,j} aggregation
+│   ├── clean_instruments.py  # noise cleaning + per-chunk I_{i,j} aggregation
+│   ├── teacher_prompt.py     # teacher prompt builder (P + I_ij + M_ij)
+│   └── teacher_reports.py    # teacher VLM loop with causal memory
 ├── videos/                 # input videos, git-ignored
 ├── yolo-model/             # model.pt, git-ignored
 ├── output-segmented/       # annotated outputs, git-ignored
-└── output-instruments/     # raw/clean/chunk CSVs, git-ignored
+├── output-instruments/     # raw/clean/chunk CSVs, git-ignored
+└── output-teacher/         # clips/reports/memory snapshots, git-ignored
 ```
 
 ## Notes
