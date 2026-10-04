@@ -28,10 +28,11 @@ holds transitions). Chunk tiers then follow exactly the teacher-prompt design:
 Chunks: one per timeline segment; segments longer than ~1 min (the VLM's
 effective short-video window) are split into ceil(dur/60) ~1-min subchunks.
 
-Run: uv run python src/vlm_report_framework/clean_instruments.py
+Run: uv run python src/vlm_report_framework/clean_instruments.py [--videos all]
 """
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 
@@ -40,7 +41,7 @@ import pandas as pd
 REPO = Path.cwd()
 RAW_DIR = REPO / "output-instruments"
 
-VIDEOS = ["PH_0001_2931_S2", "PH_0043_0096_S1", "PH_0057_0239_S1"]
+DEFAULT_VIDEOS = ["PH_0001_2931_S2", "PH_0043_0096_S1", "PH_0057_0239_S1"]
 
 # --- tunables (thresholds chosen from the raw-detection analysis, see notes) ---
 CONF_MIN = 0.25
@@ -206,11 +207,25 @@ def clean_video(video_id: str) -> None:
     print(kept_df.groupby("class_name")["frame"].nunique().sort_values(ascending=False).to_string())
 
 
-def main() -> None:
+def main(videos: list[str] | None = None) -> None:
     RAW_DIR.mkdir(parents=True, exist_ok=True)
-    for vid in VIDEOS:
+    if videos is None:
+        videos = DEFAULT_VIDEOS
+    for vid in videos:
+        raw_path = RAW_DIR / f"{vid}_instruments_raw.csv"
+        if not raw_path.exists():
+            print(f"-- skip {vid} (no raw CSV; run extract first)")
+            continue
         clean_video(vid)
 
 
 if __name__ == "__main__":
-    main()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--videos", default=",".join(DEFAULT_VIDEOS),
+                    help="comma-separated video IDs or 'all'")
+    args = ap.parse_args()
+    if args.videos == "all":
+        ids = sorted(p.name for p in (REPO / "videos").glob("PH_*") if p.is_dir())
+    else:
+        ids = [v.strip() for v in args.videos.split(",") if v.strip()]
+    main(ids)

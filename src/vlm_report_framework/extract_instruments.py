@@ -11,8 +11,10 @@ Notes:
   instruments, so they are excluded here. The teacher-VLM prompt needs
   candidate *instruments* only.
 - frame = 0-based_decode frame index in stream order; t_s = frame / fps.
-- Run: uv run python src/vlm_report_framework/extract_instruments.py
+- Run: uv run python src/vlm_report_framework/extract_instruments.py [--videos all]
+- Existing raw CSVs are skipped (delete to force re-extraction).
 """
+import argparse
 from pathlib import Path
 
 import cv2
@@ -23,10 +25,10 @@ REPO = Path.cwd()
 MODEL_PATH = REPO / "yolo-model" / "model.pt"
 OUTPUT_DIR = REPO / "output-instruments"
 
-VIDEOS = [
-    REPO / "videos" / "PH_0001_2931_S2" / "PH_0001_2931_S2.mp4",  # S2
-    REPO / "videos" / "PH_0043_0096_S1" / "PH_0043_0096_S1.mp4",  # S1
-    REPO / "videos" / "PH_0057_0239_S1" / "PH_0057_0239_S1.mp4",  # S1
+DEFAULT_VIDEOS = [
+    "PH_0001_2931_S2",  # S2
+    "PH_0043_0096_S1",  # S1
+    "PH_0057_0239_S1",  # S1
 ]
 
 TISSUE_IDS = {3, 9}  # Cornea, Pupil
@@ -42,14 +44,29 @@ def video_fps(video: Path) -> float:
     return fps, n, w, h
 
 
-def main():
+def resolve_videos(spec: str) -> list[Path]:
+    if spec == "all":
+        ids = sorted(p.name for p in (REPO / "videos").glob("PH_*") if p.is_dir())
+    else:
+        ids = [v.strip() for v in spec.split(",") if v.strip()]
+    paths = [REPO / "videos" / vid / f"{vid}.mp4" for vid in ids]
+    for v in paths:
+        assert v.exists(), f"Video not found: {v}"
+    return paths
+
+
+def main(videos: list[Path]):
     assert MODEL_PATH.exists(), f"Model not found: {MODEL_PATH}"
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     model = YOLO(str(MODEL_PATH))
     print(f"Task: {model.task}, classes: {model.names}")
 
-    for video in VIDEOS:
+    for video in videos:
         video_id = video.stem
+        out = OUTPUT_DIR / f"{video_id}_instruments_raw.csv"
+        if out.exists():
+            print(f"-- skip {video_id} (raw CSV exists: {out})", flush=True)
+            continue
         fps, n_frames, w, h = video_fps(video)
         frame_area = w * h
         print(f"\n=== {video_id} ({w}x{h} @ {fps:.2f} fps, {n_frames} frames) ===", flush=True)
@@ -99,4 +116,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--videos", default=",".join(DEFAULT_VIDEOS),
+                    help="comma-separated video IDs or 'all'")
+    args = ap.parse_args()
+    main(resolve_videos(args.videos))
