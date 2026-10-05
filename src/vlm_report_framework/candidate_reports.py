@@ -93,9 +93,19 @@ def build_inputs(processor, video_path: str, question: str,
     return inputs, text
 
 
+def clip_frame_count(video_path: str) -> int | None:
+    """Total frames in the clip (decord); None if unreadable."""
+    try:
+        from decord import VideoReader
+        return len(VideoReader(video_path))
+    except Exception:
+        return None
+
+
 @torch.no_grad()
 def generate(processor, model, video_path: str, prompt: str, args) -> tuple[str, float, int]:
-    n = args.max_frames
+    total = clip_frame_count(video_path)
+    n = args.max_frames if total is None else max(2, min(args.max_frames, total))
     last_err = None
     while n >= 2:
         try:
@@ -119,7 +129,13 @@ def generate(processor, model, video_path: str, prompt: str, args) -> tuple[str,
             gc.collect()
             torch.cuda.empty_cache()
             n //= 2
-    raise RuntimeError(f"OOM even at 2 frames: {last_err}")
+        except ValueError as e:
+            # e.g. short clip: requested nframes > available frames
+            if "nframes" not in str(e):
+                raise
+            last_err = e
+            n //= 2
+    raise RuntimeError(f"Failed even at 2 frames: {last_err}")
 
 
 @torch.no_grad()
