@@ -318,7 +318,8 @@ def main() -> None:
     ap.add_argument("--videos", default=",".join(DEFAULT_VIDEOS))
     ap.add_argument("--settings", default="s1,s2,s3")
     ap.add_argument("--chunks", default=None)
-    ap.add_argument("--max-frames", type=int, default=16)
+    ap.add_argument("--max-frames", type=int, default=32,
+                    help="frames sampled per chunk; short clips feed all their frames")
     ap.add_argument("--max-pixels", type=int, default=307200)
     ap.add_argument("--min-pixels", type=int, default=100352)
     ap.add_argument("--max-new-tokens", type=int, default=512)
