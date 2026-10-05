@@ -25,7 +25,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from teacher_prompt import instrument_block  # noqa: E402
 
-REPORT_CONTRACT = """Return a JSON object with exactly these keys:
+REPORT_CONTRACT = """Respond with ONLY a JSON object, no other text. It must have
+exactly these keys:
 - "report": a single PLAIN-TEXT string (never a nested JSON object),
   using exactly these labeled lines in this order:
   Phase: <phase id and name, time window>
@@ -39,7 +40,14 @@ REPORT_CONTRACT = """Return a JSON object with exactly these keys:
   chunk (what changed / what persists at chunk end, e.g. flap state,
   fragment volume, lens position). Empty string if nothing carries over.
 - "flags_add": list of persistent event tags like
-  "capsule_flap_torn@P03_o01". Empty list if none."""
+  "capsule_flap_torn@P03_o01". Empty list if none.
+
+Example response (for a different chunk — follow the shape, not the content):
+{
+  "report": "Phase: P01 (Incision), 00:57.00-01:03.10\\nObserved instruments: tissue forceps [Forceps]\\nCandidate but not confirmed: None\\nAnatomy visible: cornea, pupil, iris\\nActions/events: The primary knife creates a clear corneal incision while tissue forceps stabilize the globe. No intraocular entry yet.",
+  "memory_update": "Clear corneal incision made; globe stabilized with forceps, no intraocular entry yet.",
+  "flags_add": []
+}"""
 
 SYSTEM_PROMPT = """You are a factual describer of cataract surgery video.
 Describe ONLY what is visually supported in the CURRENT video chunk:

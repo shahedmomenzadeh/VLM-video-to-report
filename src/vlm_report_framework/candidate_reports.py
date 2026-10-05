@@ -103,7 +103,10 @@ def generate(processor, model, video_path: str, prompt: str, args) -> tuple[str,
                                      args.max_pixels, args.min_pixels)
             out = model.generate(
                 **inputs, max_new_tokens=args.max_new_tokens,
-                do_sample=False, use_cache=True,
+                do_sample=(args.temperature > 0.0),
+                temperature=max(args.temperature, 1e-6),
+                top_p=0.8, top_k=20, min_p=0.0,
+                repetition_penalty=1.05, use_cache=True,
                 eos_token_id=[151645, 151643],
                 pad_token_id=processor.tokenizer.eos_token_id)
             gen = out[0][inputs["input_ids"].shape[1]:]
@@ -117,6 +120,29 @@ def generate(processor, model, video_path: str, prompt: str, args) -> tuple[str,
             torch.cuda.empty_cache()
             n //= 2
     raise RuntimeError(f"OOM even at 2 frames: {last_err}")
+
+
+@torch.no_grad()
+def reformat_retry(processor, model, video_path: str, prev: str,
+                   args, n_frames: int) -> str:
+    """Second chance: ask the model to reformat its answer as valid JSON."""
+    prompt = ("Your previous response below is not valid JSON. Reformat the "
+              "SAME content as one JSON object with exactly the keys "
+              '"report" (plain-text string), "memory_update" and "flags_add". '
+              "Respond with ONLY the JSON object, no other text.\n\n"
+              f"Previous response:\n{prev[:3000]}")
+    inputs, _ = build_inputs(processor, video_path, prompt, n_frames,
+                             args.max_pixels, args.min_pixels)
+    out = model.generate(
+        **inputs, max_new_tokens=args.max_new_tokens,
+        do_sample=(args.temperature > 0.0),
+        temperature=max(args.temperature, 1e-6),
+        top_p=0.8, top_k=20, min_p=0.0,
+        repetition_penalty=1.05, use_cache=True,
+        eos_token_id=[151645, 151643],
+        pad_token_id=processor.tokenizer.eos_token_id)
+    gen = out[0][inputs["input_ids"].shape[1]:]
+    return processor.tokenizer.decode(gen, skip_special_tokens=True).strip()
 
 
 def coerce_report(parsed: dict, raw: str) -> tuple[str, str, list]:
@@ -227,10 +253,20 @@ def run_combo(processor, model, args, video_id: str, setting: str) -> None:
         print(f"  response in {dt:.0f}s ({n_frames} frames)", flush=True)
         try:
             parsed = parse_json_loose(raw)
-        except (ValueError, AttributeError) as e:
-            print(f"  WARN: unparseable ({e}); storing raw", flush=True)
-            parsed = {}
+        except (ValueError, AttributeError):
+            print("  not JSON — one reformat retry", flush=True)
+            t1 = time.time()
+            raw = reformat_retry(processor, model, str(clip), raw, args, n_frames)
+            dt += time.time() - t1
+            try:
+                parsed = parse_json_loose(raw)
+            except (ValueError, AttributeError) as e:
+                print(f"  WARN: unparseable after retry ({e}); storing raw", flush=True)
+                parsed = {}
         report, memory_update, flags_add = coerce_report(parsed, raw)
+        retried = not parsed
+        if retried:
+            print("  WARN: empty parse; memory_update lost for this chunk", flush=True)
 
         (rep_dir / f"{video_id}__{cid}.md").write_text(report or raw)
         (rep_dir / f"{video_id}__{cid}.json").write_text(json.dumps(
@@ -253,6 +289,8 @@ def run_combo(processor, model, args, video_id: str, setting: str) -> None:
                  "tiers_given": tiers if setting == "s3" else None,
                  "report": report or raw, "memory_update": memory_update,
                  "flags_add": flags_add, "n_frames_used": n_frames,
+                 "temperature": args.temperature,
+                 "reformat_retried": retried,
                  "latency_s": round(dt, 1)}) + "\n")
         print(f"  saved ({len(report or raw)} chars)", flush=True)
 
@@ -267,7 +305,8 @@ def main() -> None:
     ap.add_argument("--max-frames", type=int, default=16)
     ap.add_argument("--max-pixels", type=int, default=307200)
     ap.add_argument("--min-pixels", type=int, default=100352)
-    ap.add_argument("--max-new-tokens", type=int, default=1024)
+    ap.add_argument("--max-new-tokens", type=int, default=512)
+    ap.add_argument("--temperature", type=float, default=0.7)
     args = ap.parse_args()
 
     settings = [s.strip() for s in args.settings.split(",") if s.strip()]
