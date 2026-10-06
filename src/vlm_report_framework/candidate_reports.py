@@ -106,7 +106,8 @@ def run_combo(backend, ctx, args, video_id: str, setting: str) -> None:
     mem = rebuild_memory(mem_path, fresh_memory())
     gen = {"max_pixels": args.max_pixels, "min_pixels": args.min_pixels,
            "max_new_tokens": args.max_new_tokens,
-           "temperature": args.temperature}
+           "temperature": args.temperature,
+           "fps": args.fps, "frame_size": args.frame_size}
 
     for cid in wanted:
         if cid in done:
@@ -186,7 +187,8 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", required=True, help="local path or HF id")
     ap.add_argument("--backend", default="qwen3vl",
-                    help="model family backend (qwen3vl; hulumed/lingshu plug in here)")
+                    help="model family backend: qwen3vl (.venv-qwen3vl), "
+                         "hulumed (.venv-hulumed), lingshu (.venv-qwen3vl)")
     ap.add_argument("--model-tag", required=True)
     ap.add_argument("--videos", default=",".join(DEFAULT_VIDEOS))
     ap.add_argument("--settings", default="s1,s2,s3")
@@ -195,6 +197,10 @@ def main() -> None:
                     help="frames sampled per chunk; short clips feed all their frames")
     ap.add_argument("--max-pixels", type=int, default=307200)
     ap.add_argument("--min-pixels", type=int, default=100352)
+    ap.add_argument("--fps", type=float, default=1.0,
+                    help="hulumed only: sampling fps in the video dict")
+    ap.add_argument("--frame-size", type=int, default=480,
+                    help="hulumed only: frame size in the video dict")
     ap.add_argument("--max-new-tokens", type=int, default=512)
     ap.add_argument("--temperature", type=float, default=0.7)
     args = ap.parse_args()

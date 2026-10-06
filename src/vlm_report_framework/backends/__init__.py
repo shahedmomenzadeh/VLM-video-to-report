@@ -34,4 +34,10 @@ def get_backend(name: str, model_path: str) -> VideoBackend:
     if name == "qwen3vl":
         from .qwen3vl import Qwen3VLBackend
         return Qwen3VLBackend(model_path)
-    raise ValueError(f"unknown backend: {name} (available: qwen3vl)")
+    if name == "hulumed":
+        from .hulumed import HuluMedBackend
+        return HuluMedBackend(model_path)
+    if name == "lingshu":
+        from .lingshu import LingshuBackend
+        return LingshuBackend(model_path)
+    raise ValueError(f"unknown backend: {name} (available: qwen3vl, hulumed, lingshu)")
