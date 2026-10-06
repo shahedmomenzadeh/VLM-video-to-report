@@ -61,6 +61,13 @@ OUT = REPO / "output-candidates"
 CLIPS = REPO / "output-teacher" / "clips"
 
 SETTINGS = ("s1", "s2", "s3")
+# Explicit aliases for the three inference conditions (normalized to s1/s2/s3;
+# outputs always use the canonical ids so the schema stays stable).
+SETTING_ALIASES = {
+    "video": "s1",                    # 1. video chunk only
+    "phase": "s2",                    # 2. chunk + phase name
+    "full": "s3", "phase+instrument": "s3", "phase-instrument": "s3",
+}                                     # 3. chunk + phase + instruments
 DEFAULT_VIDEOS = ["PH_0001_2931_S2", "PH_0043_0096_S1", "PH_0057_0239_S1"]
 
 REFORMAT_INSTRUCTION = (
@@ -191,7 +198,9 @@ def main() -> None:
                          "hulumed (.venv-hulumed), lingshu (.venv-qwen3vl)")
     ap.add_argument("--model-tag", required=True)
     ap.add_argument("--videos", default=",".join(DEFAULT_VIDEOS))
-    ap.add_argument("--settings", default="s1,s2,s3")
+    ap.add_argument("--settings", default="s1,s2,s3",
+                    help="subset of {s1,s2,s3} or aliases {video,phase,full}; "
+                         "1=video only, 2=+phase name, 3=+phase+instruments")
     ap.add_argument("--chunks", default=None)
     ap.add_argument("--max-frames", type=int, default=32,
                     help="frames sampled per chunk; short clips feed all their frames")
@@ -205,7 +214,8 @@ def main() -> None:
     ap.add_argument("--temperature", type=float, default=0.7)
     args = ap.parse_args()
 
-    settings = [s.strip() for s in args.settings.split(",") if s.strip()]
+    raw_settings = [s.strip().lower() for s in args.settings.split(",") if s.strip()]
+    settings = [SETTING_ALIASES.get(s, s) for s in raw_settings]
     assert set(settings) <= set(SETTINGS), settings
     videos = resolve_videos(args.videos, DEFAULT_VIDEOS)
 
