@@ -22,6 +22,8 @@ yolo-model/
 output-segmented/
 output-instruments/
 output-teacher/
+output-teacher-backup-v1/
+output-candidates/
 runs/
 *.pt
 *.mp4
