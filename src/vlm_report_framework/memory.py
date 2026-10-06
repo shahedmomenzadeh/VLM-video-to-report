@@ -18,6 +18,10 @@ from __future__ import annotations
 
 SUMMARY_CAP = 1600
 TRAIL_CAP = 10
+# Anti-cascade: verbatim memory is capped so one degenerate (looping)
+# response can't bloat every downstream prompt. Above the longest
+# legit teacher report (~1000 chars); only truncates pathological dumps.
+VERBATIM_CAP = 1500
 
 
 def fresh_memory() -> dict:
@@ -56,7 +60,7 @@ def update_memory(
                     else mem.get("prev_nonidle_report", ""))
     flags = mem.get("flags", []) + [f for f in (flags_add or [])
                                     if f not in mem.get("flags", [])]
-    return {"running_summary": summary, "prev_report": report,
-            "prev_nonidle_report": prev_nonidle,
+    return {"running_summary": summary, "prev_report": report[:VERBATIM_CAP],
+            "prev_nonidle_report": prev_nonidle[:VERBATIM_CAP],
             "phase_trail": trail, "instruments_seen": seen, "flags": flags,
             "same_phase_continuation": False}

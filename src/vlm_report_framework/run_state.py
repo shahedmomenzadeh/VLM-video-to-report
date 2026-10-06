@@ -82,6 +82,13 @@ def estimate_frames(chunk: dict) -> int:
 
 
 def parse_json_loose(text: str) -> dict:
+    import re
+    # strip ```json fenced blocks (models often wrap the answer)
+    m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    if m:
+        text = m.group(1)
+    else:
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
     try:
         return json.loads(text)
     except json.JSONDecodeError:
