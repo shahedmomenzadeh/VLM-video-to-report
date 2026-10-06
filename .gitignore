@@ -31,3 +31,6 @@ runs/
 
 # HF dataset staging (large, uploaded to Hub)
 hf_dataset/
+
+# Part III judge outputs (regenerable, large)
+output-judge/
