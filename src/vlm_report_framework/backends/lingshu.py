@@ -126,8 +126,10 @@ class LingshuBackend(VideoBackend):
                 last_err = e
                 gc.collect()
                 torch.cuda.empty_cache()
-            except ValueError as e:
-                if "nframes" not in str(e) and "frame" not in str(e).lower():
+            except (ValueError, AttributeError) as e:
+                msg = str(e)
+                if "nframes" not in msg and "frame" not in msg.lower() \
+                        and "read_video" not in msg:
                     raise
                 last_err = e
                 gc.collect()

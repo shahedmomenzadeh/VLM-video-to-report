@@ -129,8 +129,8 @@ class HuluMedBackend(VideoBackend):
                 last_err = e
                 gc.collect()
                 torch.cuda.empty_cache()
-            except ValueError as e:
-                if "nframes" not in str(e):
+            except (ValueError, AttributeError) as e:
+                if "nframes" not in str(e) and "read_video" not in str(e):
                     raise
                 last_err = e
                 gc.collect()

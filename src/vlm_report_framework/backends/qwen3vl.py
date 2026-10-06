@@ -96,9 +96,16 @@ class Qwen3VLBackend(VideoBackend):
                     gc.collect()
                     torch.cuda.empty_cache()
                     n //= 2
-                except ValueError as e:
-                    if "nframes" not in str(e):
+                except (ValueError, AttributeError) as e:
+                    # ValueError(nframes): asked for more frames than the clip
+                    # decodes. AttributeError(read_video): qwen_vl_utils'
+                    # broken torchvision fallback after the same mismatch
+                    # (decord length vs. decodable frames can differ by one).
+                    msg = str(e)
+                    if "nframes" not in msg and "read_video" not in msg:
                         raise
                     last_err = e
+                    gc.collect()
+                    torch.cuda.empty_cache()
                     n //= 2
         raise RuntimeError(f"Failed even at 2 frames: {last_err}")
