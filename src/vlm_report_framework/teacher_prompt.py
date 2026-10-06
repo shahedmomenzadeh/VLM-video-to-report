@@ -2,24 +2,24 @@
 
 C(i,j) + P(i) + I(i,j) + M(i,j) -> R_teacher(i,j)
 
-YOLO class names are mapped to surgical terms for the VLM; raw names are kept
-in parentheses for traceability.
+Shared blocks (labels, background, formatting) live in prompt_base.py;
+this module holds the teacher's system prompt, output contract, and the
+full-context assembly (phase + tiers always given).
 """
 from __future__ import annotations
 
-# Raw YOLO class name -> human surgical term shown to the teacher VLM.
-INSTRUMENT_LABELS: dict[str, str] = {
-    "Cannula": "cannula",
-    "Cap-Cystotome": "cystotome (capsulorhexis needle)",
-    "Cap-Forceps": "capsulorhexis forceps",
-    "Forceps": "tissue forceps",
-    "I-A-Handpiece": "irrigation-aspiration handpiece",
-    "Lens-Injector": "lens injector",
-    "Phaco-Handpiece": "phacoemulsification handpiece",
-    "Primary-Knife": "primary (keratome) knife",
-    "Second-Instrument": "second instrument (chopper/manipulator)",
-    "Secondary-Knife": "secondary (paracentesis) knife",
-}
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from prompt_base import (  # noqa: E402
+    INSTRUMENT_LABELS,
+    background_block,
+    fmt_time,
+    instrument_block,
+)
+
+__all__ = ["INSTRUMENT_LABELS", "SYSTEM_PROMPT", "build_user_prompt"]
 
 SYSTEM_PROMPT = """You are a factual describer of cataract surgery video.
 Describe ONLY what is visually supported in the CURRENT video chunk:
@@ -46,22 +46,6 @@ REPORT_SECTIONS = """Return a JSON object with exactly these keys:
   "capsule_flap_torn@P03_o01". Empty list if none."""
 
 
-def label(class_name: str) -> str:
-    term = INSTRUMENT_LABELS.get(class_name, class_name)
-    return f"{term} [{class_name}]" if term != class_name else term
-
-
-def instrument_block(rows: list[dict]) -> str:
-    """Format chunk-instrument rows as 'name (n/total frames, med conf x.xx)' lines."""
-    lines = []
-    for r in rows:
-        lines.append(
-            f"- {label(r['class_name'])} "
-            f"({r['n_frames']} frames, median conf {r['med_conf']:.2f})"
-        )
-    return "\n".join(lines)
-
-
 def build_user_prompt(
     chunk: dict,
     observed: list[dict],
@@ -69,8 +53,8 @@ def build_user_prompt(
     memory: dict,
     total_frames: int,
 ) -> str:
-    t0 = _fmt(chunk["t_start"])
-    t1 = _fmt(chunk["t_end"])
+    t0 = fmt_time(chunk["t_start"])
+    t1 = fmt_time(chunk["t_end"])
     parts = [
         f"CURRENT CHUNK: {t0}-{t1} of a cataract surgery, "
         f"phase {chunk['phase']} ({chunk['phase_name']}).",
@@ -81,37 +65,7 @@ def build_user_prompt(
             "Emphasize what CHANGED vs. the previous chunk (progress, instrument "
             "state, anatomy state) rather than re-describing the setup."
         )
-    bg = []
-    if memory.get("running_summary"):
-        bg.append(f"Summary of earlier chunks:\n{memory['running_summary']}")
-    if memory.get("prev_report"):
-        trail = memory.get("phase_trail") or []
-        prev_idle = bool(trail) and trail[-1] == "P13"
-        tag = (" (Idle — transition context only)"
-               if prev_idle else " (most recent action)")
-        bg.append(f"Report of immediately previous chunk{tag}:\n{memory['prev_report']}")
-    if (memory.get("prev_nonidle_report")
-            and memory["prev_nonidle_report"] != memory.get("prev_report")):
-        bg.append("Most recent NON-IDLE chunk "
-                  "(last substantive action, context only):\n"
-                  f"{memory['prev_nonidle_report']}")
-    trail = memory.get("phase_trail") or []
-    seen = memory.get("instruments_seen") or {}
-    flags = memory.get("flags") or []
-    struct = []
-    if trail:
-        struct.append(f"Phase trail: {' -> '.join(trail)}")
-    if seen:
-        struct.append("Instruments seen in earlier chunks: "
-                      + ", ".join(f"{k} (last: {v})" for k, v in seen.items()))
-    if flags:
-        struct.append("Known events: " + "; ".join(flags))
-    if struct:
-        bg.append("\n".join(struct))
-    if bg:
-        parts.append("BACKGROUND (context only, not current evidence):\n" + "\n\n".join(bg))
-    else:
-        parts.append("BACKGROUND: none — this is the first chunk of the surgery.")
+    parts.append(background_block(memory))
 
     parts.append(
         "Candidate instruments detected by an auxiliary perception model "
@@ -133,8 +87,3 @@ def build_user_prompt(
                      "Describe anatomy and state only; do not invent tools.")
     parts.append(REPORT_SECTIONS)
     return "\n\n".join(parts)
-
-
-def _fmt(t: float) -> str:
-    m, s = divmod(t, 60)
-    return f"{int(m):02d}:{s:05.2f}"
