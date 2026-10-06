@@ -199,8 +199,10 @@ def update_memory(mem: dict, chunk: dict, setting: str, report: str,
     if setting == "s3" and chunk["phase"] != "P13":
         for cls in tiers["observed"]:
             seen[cls] = chunk["chunk_id"]
+    prev_nonidle = report if phase_id not in ("P13", "P??") else mem.get("prev_nonidle_report", "")
     flags = mem["flags"] + [f for f in flags_add if f not in mem["flags"]]
     return {"running_summary": summary, "prev_report": report,
+            "prev_nonidle_report": prev_nonidle,
             "phase_trail": trail, "instruments_seen": seen, "flags": flags,
             "same_phase_continuation": False}
 

@@ -85,7 +85,16 @@ def build_user_prompt(
     if memory.get("running_summary"):
         bg.append(f"Summary of earlier chunks:\n{memory['running_summary']}")
     if memory.get("prev_report"):
-        bg.append(f"Report of immediately previous chunk:\n{memory['prev_report']}")
+        trail = memory.get("phase_trail") or []
+        prev_idle = bool(trail) and trail[-1] == "P13"
+        tag = (" (Idle — transition context only)"
+               if prev_idle else " (most recent action)")
+        bg.append(f"Report of immediately previous chunk{tag}:\n{memory['prev_report']}")
+    if (memory.get("prev_nonidle_report")
+            and memory["prev_nonidle_report"] != memory.get("prev_report")):
+        bg.append("Most recent NON-IDLE chunk "
+                  "(last substantive action, context only):\n"
+                  f"{memory['prev_nonidle_report']}")
     trail = memory.get("phase_trail") or []
     seen = memory.get("instruments_seen") or {}
     flags = memory.get("flags") or []

@@ -129,8 +129,8 @@ def parse_json_loose(text: str) -> dict:
 
 
 def fresh_memory() -> dict:
-    return {"running_summary": "", "prev_report": "", "phase_trail": [],
-            "instruments_seen": {}, "flags": [],
+    return {"running_summary": "", "prev_report": "", "prev_nonidle_report": "",
+            "phase_trail": [], "instruments_seen": {}, "flags": [],
             "same_phase_continuation": False}
 
 
@@ -146,8 +146,11 @@ def update_memory(mem: dict, chunk: dict, report: str,
     if chunk["phase"] != "P13":
         for cls in tiers["observed"]:
             seen[cls] = chunk["chunk_id"]
+    # Verbatim non-idle memory: scan-back, not literally N-2 (Idles can repeat).
+    prev_nonidle = report if chunk["phase"] != "P13" else mem.get("prev_nonidle_report", "")
     flags = mem["flags"] + [f for f in flags_add if f not in mem["flags"]]
     return {"running_summary": summary, "prev_report": report,
+            "prev_nonidle_report": prev_nonidle,
             "phase_trail": trail, "instruments_seen": seen, "flags": flags,
             "same_phase_continuation": False}
 
@@ -264,13 +267,26 @@ def probe() -> None:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--video", default=VIDEO_ID)
+    ap.add_argument("--videos", default=None,
+                    help="comma-separated video IDs (all chunks each)")
     ap.add_argument("--chunks", default=None,
                     help="comma-separated chunk ids (default: smoke test)")
     ap.add_argument("--all", action="store_true", help="run all chunks of the video")
     ap.add_argument("--probe", action="store_true", help="1-chunk end-to-end probe")
+    ap.add_argument("--workers", type=int, default=1,
+                    help="parallel videos, one worker per video (VLM calls are independent across videos)")
     args = ap.parse_args()
     if args.probe:
         probe()
+    elif args.videos:
+        vids = [v.strip() for v in args.videos.split(",") if v.strip()]
+        if args.workers > 1 and len(vids) > 1:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=args.workers) as ex:
+                list(ex.map(lambda v: run_video(v, None), vids))
+        else:
+            for v in vids:
+                run_video(v, None)
     elif args.all:
         run_video(args.video, None)
     elif args.chunks:

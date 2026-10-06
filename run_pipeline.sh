@@ -60,15 +60,12 @@ $PY src/vlm_report_framework/extract_instruments.py --videos "$VIDS_CSV"
 echo ">>> [3/4] Cleaning + per-chunk aggregation"
 $PY src/vlm_report_framework/clean_instruments.py --videos "$VIDS_CSV"
 
-echo ">>> [4/4] Teacher reports (VLM, one video at a time)"
+echo ">>> [4/4] Teacher reports (VLM, --workers ${WORKERS:-3} in parallel)"
 if ! curl -s -m 5 http://localhost:20128/v1/models > /dev/null; then
   echo "ERROR: VLM endpoint http://localhost:20128/v1 is not reachable. Aborting before stage 4."
   exit 1
 fi
-for v in "${VIDS[@]}"; do
-  echo "--- video: $v"
-  $PY src/vlm_report_framework/teacher_reports.py --video "$v" --all
-done
+$PY src/vlm_report_framework/teacher_reports.py --videos "$VIDS_CSV" --workers "${WORKERS:-3}"
 
 echo ">>> Pipeline complete."
 ls output-teacher/*_teacher_reports.jsonl
