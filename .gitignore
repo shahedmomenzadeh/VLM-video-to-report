@@ -28,3 +28,6 @@ runs/
 *.pt
 *.mp4
 *.avi
+
+# HF dataset staging (large, uploaded to Hub)
+hf_dataset/
