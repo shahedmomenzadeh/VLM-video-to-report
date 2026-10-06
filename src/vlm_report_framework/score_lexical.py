@@ -60,17 +60,51 @@ def score_pair(ref: str, hyp: str) -> dict:
     except Exception as e:  # noqa: BLE001
         s["meteor"] = None
         s["meteor_err"] = str(e)[:100]
-    # CIDEr (single reference — flat by construction; optional dep)
+    # CIDEr is corpus-level (TF-IDF over the corpus): single-pair calls
+    # degenerate to 0. Computed per-source over all videos in main().
+    return s
+
+
+def cider_corpus(refs: list[str], hyps: list[str]) -> float | None:
+    """Corpus-level CIDEr (TF-IDF over the corpus).
+
+    NOTE: CIDEr is designed for short captions with a large corpus. On 3
+    long video-docs every n-gram's document frequency saturates and even
+    self-match scores 0.0 — so here the corpus is CHUNKS (all chunk reports
+    of a source), not video-docs. Returns one number per candidate source.
+    """
     try:
         from pycocoevalcap.cider.cider import Cider
-        scorer = Cider()
-        score, _ = scorer.compute_score({0: [ref]}, {0: [hyp]})
-        s["cider"] = round(float(score), 4)
-    except Exception as e:  # noqa: BLE001
-        s["cider"] = None
-        if "No module" not in str(e):
-            s["cider_err"] = str(e)[:100]
-    return s
+        gts = {i: [r] for i, r in enumerate(refs)}
+        res = {i: [h] for i, h in enumerate(hyps)}
+        score, _ = Cider().compute_score(gts, res)
+        return round(float(score), 4)
+    except Exception:
+        return None
+
+
+def cider_chunk_corpus(source: str) -> tuple[float | None, int]:
+    """CIDEr over the chunk corpus for one candidate source (tag.setting)."""
+    import glob
+    tag, setting = source.split(".")
+    refs, hyps = [], []
+    for tf in sorted(glob.glob(str(REPO / "output-teacher" / "*_teacher_reports.jsonl"))):
+        vid = Path(tf).name.replace("_teacher_reports.jsonl", "")
+        cf = REPO / "output-candidates" / tag / setting / f"{vid}_reports.jsonl"
+        if not cf.exists():
+            continue
+        crows = {}
+        for line in open(cf):
+            r = json.loads(line)
+            crows[r["chunk_id"]] = r.get("report", "")
+        for line in open(tf):
+            r = json.loads(line)
+            if r["chunk_id"] in crows:
+                refs.append(r.get("report", ""))
+                hyps.append(crows[r["chunk_id"]])
+    if not refs:
+        return None, 0
+    return cider_corpus(refs, hyps), len(refs)
 
 
 def main() -> None:
@@ -98,16 +132,28 @@ def main() -> None:
             rows.append(row)
             print(f"{vid} {src}: rougeL={row['full_rougeL_f']} "
                   f"chrf={row['full_chrf']} meteor={row['full_meteor']} "
-                  f"bleu={row['full_bleu']} cider={row['full_cider']}")
+                  f"bleu={row['full_bleu']}")
+    with open(OUT / "scores.jsonl", "w") as f:
+        for r in rows:
+            f.write(json.dumps(r) + "\n")
+    # CIDEr corpus-level per source over the CHUNK corpus (video-doc corpus
+    # of 3 degenerates: shared boilerplate saturates IDF, self-match = 0.0)
+    cider_by_src = {}
+    for src in sorted(set(r["source"] for r in rows)):
+        score, n = cider_chunk_corpus(src)
+        cider_by_src[src] = score
+        print(f"CIDEr chunk-corpus {src}: n={n} cider={score}")
+    for r in rows:
+        r["full_cider_corpus"] = cider_by_src.get(r["source"])
     with open(OUT / "scores.jsonl", "w") as f:
         for r in rows:
             f.write(json.dumps(r) + "\n")
     # summary: mean per source over videos
     import statistics
     sources = sorted(set(r["source"] for r in rows))
-    lines = ["# Lexical agreement (mean over videos)", "",
-             "| source | videos | full_rougeL | full_chrF | full_METEOR | full_BLEU | obs_rougeL | act_rougeL |",
-             "|---|---|---|---|---|---|---|---|"]
+    lines = ["# Lexical agreement (mean over videos; CIDEr corpus-level per source)", "",
+             "| source | videos | full_rougeL | full_chrF | full_METEOR | full_BLEU | full_CIDEr | obs_rougeL | act_rougeL |",
+             "|---|---|---|---|---|---|---|---|---|"]
     for src in sources:
         sub = [r for r in rows if r["source"] == src]
         def mean(k: str):  # noqa: ANN202
@@ -115,6 +161,7 @@ def main() -> None:
             return round(statistics.mean(vs), 3) if vs else "-"
         lines.append(f"| {src} | {len(sub)} | {mean('full_rougeL_f')} | "
                      f"{mean('full_chrf')} | {mean('full_meteor')} | {mean('full_bleu')} | "
+                     f"{sub[0].get('full_cider_corpus', '-')} | "
                      f"{mean('obs_rougeL_f')} | {mean('act_rougeL_f')} |")
     (OUT / "summary.md").write_text("\n".join(lines) + "\n")
     print(f"Done. {len(rows)} rows -> {OUT.relative_to(REPO)}/scores.jsonl")
