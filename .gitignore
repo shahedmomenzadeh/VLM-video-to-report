@@ -36,3 +36,5 @@ hf_dataset/
 output-judge/
 # Local HF cache (model weights, regenerable)
 hf_home/
+# Local GPU inference venv
+.venv-vlm/
