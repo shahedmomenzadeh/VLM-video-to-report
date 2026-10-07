@@ -80,16 +80,24 @@ snapshot_download(repo_id="$MODEL_ID", local_dir="$MODEL_DIR",
                   token=os.environ.get("HF_TOKEN") or None)
 PY
 
-echo ">>> inference: $MODEL_TAG x s1,s2,s3 (videos=$VIDEOS)"
+if [ "$VIDEOS" = "all" ]; then
+  mapfile -t VLIST < <(ls hf_dataset/videos/*.mp4 | xargs -n1 basename | sed 's/\.mp4$//' | sort)
+else
+  IFS=',' read -ra VLIST <<< "$VIDEOS"
+fi
+for VID in "${VLIST[@]}"; do
+echo ">>> video: $VID"
+echo ">>> inference: $MODEL_TAG x s1,s2,s3 (video=$VID)"
 python src/vlm_report_framework/candidate_reports.py \
   --backend "$BACKEND" --model "$MODEL_DIR" --model-tag "$MODEL_TAG" \
-  --videos "$VIDEOS" --settings s1,s2,s3 --max-frames "$MAX_FRAMES"
+  --videos "$VID" --settings s1,s2,s3 --max-frames "$MAX_FRAMES"
 
-echo ">>> audit"
+echo ">>> audit $VID"
 python src/vlm_report_framework/verify_candidates.py --model-tag "$MODEL_TAG" || true
 
-echo ">>> zip -> $OUTZIP"
+echo ">>> checkpoint zip -> $OUTZIP ($VID done)"
 rm -f "$OUTZIP"
 zip -qr "$OUTZIP" "output-candidates/$MODEL_TAG"
 ls -lh "$OUTZIP"
+done
 echo "DONE. Download $OUTZIP from the notebook output panel."
