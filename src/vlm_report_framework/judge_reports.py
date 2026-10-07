@@ -35,6 +35,7 @@ from judge_prompt import (  # noqa: E402
     build_evidence_block,
     build_pairwise_prompt,
     build_scoring_prompt,
+    get_prompt_version,
 )
 from run_state import REPO, parse_json_loose  # noqa: E402
 
@@ -57,7 +58,8 @@ def evidence_for(video_id: str) -> str:
 
 
 def call_judge(client, model: str, prompt: str, video_path: Path | None,
-               temperature: float, max_tokens: int) -> tuple[str, float]:
+               temperature: float, max_tokens: int,
+               system: str = SYSTEM_PROMPT) -> tuple[str, float]:
     content: list = [{"type": "text", "text": prompt}]
     if video_path is not None:
         b64 = base64.b64encode(video_path.read_bytes()).decode()
@@ -66,7 +68,7 @@ def call_judge(client, model: str, prompt: str, video_path: Path | None,
     t0 = time.time()
     resp = client.chat.completions.create(
         model=model, temperature=temperature, max_tokens=max_tokens,
-        messages=[{"role": "system", "content": SYSTEM_PROMPT},
+        messages=[{"role": "system", "content": system},
                   {"role": "user", "content": content}],
         timeout=600)
     return resp.choices[0].message.content or "", time.time() - t0
@@ -84,8 +86,8 @@ def done_keys(path: Path, key: tuple) -> set:
     return done
 
 
-def candidate_sources() -> list[tuple[str, str]]:
-    """(doc_suffix, source_label) for every non-teacher stitched doc."""
+def candidate_sources(include_teacher_self: bool = False) -> list[tuple[str, str]]:
+    """(video_id, source_label, doc_path) for every non-teacher stitched doc."""
     out = []
     for p in sorted(DOCS.glob("*.md")):
         if ".teacher." in p.name:
@@ -93,6 +95,10 @@ def candidate_sources() -> list[tuple[str, str]]:
         stem = p.name[:-len(".md")]  # <VID>.<tag>.<setting>
         vid, rest = stem.split(".", 1)
         out.append((vid, rest, p))
+    if include_teacher_self:
+        for p in sorted(DOCS.glob("*.teacher.md")):
+            vid = p.name.split(".")[0]
+            out.append((vid, "teacher-self", p))
     return out
 
 
@@ -100,21 +106,26 @@ def run_score(args, client) -> None:
     out_dir = OUT_SCORE / args.judge_tag
     out_dir.mkdir(parents=True, exist_ok=True)
     master = out_dir / "scores.jsonl"
-    done = done_keys(master, ("video_id", "source"))
-    cands = [(v, s, p) for v, s, p in candidate_sources()
+    done = done_keys(master, ("video_id", "source", "prompt_version"))
+    system, _ = get_prompt_version(args.prompt_version)
+    cands = [(v, s, p) for v, s, p in
+             candidate_sources(args.include_teacher_self)
              if not args.videos or v in args.videos]
     for vid, src, p in cands:
-        if (vid, src) in done:
-            print(f"-- skip {vid} {src} (done)")
+        if (vid, src, args.prompt_version) in done:
+            print(f"-- skip {vid} {src} {args.prompt_version} (done)")
             continue
-        prompt = build_scoring_prompt(p.read_text(), evidence_for(vid))
+        prompt = build_scoring_prompt(p.read_text(), evidence_for(vid),
+                                      version=args.prompt_version)
         vpath = (REPO / "videos" / vid / f"{vid}.mp4") if args.video_full else None
-        print(f"=== score {vid} {src} ===", flush=True)
+        print(f"=== score {vid} {src} [{args.prompt_version}] ===", flush=True)
         try:
             raw, dt = call_judge(client, args.model, prompt, vpath,
-                                 args.temperature, args.max_tokens)
+                                 args.temperature, args.max_tokens,
+                                 system=system)
             parsed = parse_json_loose(raw)
             row = {"video_id": vid, "source": src, "judge": args.model,
+                   "prompt_version": args.prompt_version,
                    **{k: parsed.get(k) for k in (
                        "groundedness", "completeness",
                        "instrument_correctness", "temporal_coherence",
@@ -122,6 +133,7 @@ def run_score(args, client) -> None:
                    "latency_s": round(dt, 1)}
         except Exception as e:  # noqa: BLE001 — store failure, keep going
             row = {"video_id": vid, "source": src, "judge": args.model,
+                   "prompt_version": args.prompt_version,
                    "error": str(e)[:300]}
             print(f"  WARN: {e}", flush=True)
         with open(master, "a") as f:
@@ -193,6 +205,10 @@ def main() -> None:
     ap.add_argument("--base-url", default="http://localhost:20128/v1")
     ap.add_argument("--api-key", default="not-needed")
     ap.add_argument("--judge-tag", default="judge-v1")
+    ap.add_argument("--prompt-version", choices=("v1", "v2", "v3"), default="v1",
+                    help="scoring rubric variant (calibration study)")
+    ap.add_argument("--include-teacher-self", action="store_true",
+                    help="also score the teacher doc as a candidate (sanity: expect ~5s)")
     ap.add_argument("--videos", default=None,
                     help="comma-separated video IDs (default: all stitched)")
     ap.add_argument("--video-full", action="store_true",
