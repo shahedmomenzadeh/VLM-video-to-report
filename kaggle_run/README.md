@@ -3,8 +3,10 @@
 Each script is self-contained for a fresh Kaggle GPU notebook: GPU check →
 pip install (pip, not uv) → HF dataset download → repo-layout materialization
 (symlinks into `videos/`, `output-instruments/`, `output-teacher/clips/`) →
-model weights download → `candidate_reports.py` sweep → `verify_candidates`
-audit → zip of `output-candidates/<tag>` for download.
+model weights download → per-video `candidate_reports.py` sweep (all three
+settings) → `verify_candidates` audit → zip of `output-candidates/<tag>` for download.
+The zip is rebuilt after **each video** (checkpoint), so partial results are
+always downloadable if a session dies; reruns resume finished chunks.
 
 ```bash
 !git clone https://github.com/shahedmomenzadeh/VLM-video-to-report
