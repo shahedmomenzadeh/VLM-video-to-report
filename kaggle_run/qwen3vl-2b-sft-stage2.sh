@@ -17,7 +17,7 @@ MODEL_ID="shahedm2001/qwen3-vl-2b-cataract-sft-stage2"
 MODEL_DIR="models/qwen3-vl-2b-cataract-sft-stage2"
 MODEL_TAG="qwen3vl-2b-sft-stage2"
 BACKEND="qwen3vl"
-VIDEOS="${VIDEOS:-PH_0001_2931_S2,PH_0043_0096_S1,PH_0057_0239_S1}"
+VIDEOS="${VIDEOS:-all}"
 MAX_FRAMES="${MAX_FRAMES:-32}"
 OUTZIP="${OUTZIP:-/kaggle/working/${MODEL_TAG}-results.zip}"
 

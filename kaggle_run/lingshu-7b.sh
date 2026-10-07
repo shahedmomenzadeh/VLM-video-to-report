@@ -16,7 +16,7 @@ MODEL_ID="lingshu-medical-mllm/Lingshu-7B"
 MODEL_DIR="models/Lingshu-7B"
 MODEL_TAG="lingshu-7b"
 BACKEND="lingshu"
-VIDEOS="${VIDEOS:-PH_0001_2931_S2,PH_0043_0096_S1,PH_0057_0239_S1}"
+VIDEOS="${VIDEOS:-all}"
 MAX_FRAMES="${MAX_FRAMES:-32}"
 OUTZIP="${OUTZIP:-/kaggle/working/${MODEL_TAG}-results.zip}"
 
