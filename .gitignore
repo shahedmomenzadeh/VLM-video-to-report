@@ -38,3 +38,5 @@ output-judge/
 hf_home/
 # Local GPU inference venv
 .venv-vlm/
+# Kaggle/local model downloads (regenerable)
+models/
