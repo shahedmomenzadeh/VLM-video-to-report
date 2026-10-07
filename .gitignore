@@ -34,3 +34,5 @@ hf_dataset/
 
 # Part III judge outputs (regenerable, large)
 output-judge/
+# Local HF cache (model weights, regenerable)
+hf_home/
