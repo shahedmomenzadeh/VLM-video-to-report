@@ -110,7 +110,8 @@ def run_score(args, client) -> None:
     system, _ = get_prompt_version(args.prompt_version)
     cands = [(v, s, p) for v, s, p in
              candidate_sources(args.include_teacher_self)
-             if not args.videos or v in args.videos]
+             if (not args.videos or v in args.videos)
+             and (not args.sources or any(x in s for x in args.sources))]
     for vid, src, p in cands:
         if (vid, src, args.prompt_version) in done:
             print(f"-- skip {vid} {src} {args.prompt_version} (done)")
@@ -211,6 +212,9 @@ def main() -> None:
                     help="also score the teacher doc as a candidate (sanity: expect ~5s)")
     ap.add_argument("--videos", default=None,
                     help="comma-separated video IDs (default: all stitched)")
+    ap.add_argument("--sources", default=None,
+                    help="comma-separated source substrings, e.g. 'grpo' or "
+                         "'qwen3vl-2b-instruct.s3' (default: all candidates)")
     ap.add_argument("--video-full", action="store_true",
                     help="attach full surgery mp4 as judge video evidence")
     ap.add_argument("--temperature", type=float, default=0.0)
@@ -218,6 +222,8 @@ def main() -> None:
     args = ap.parse_args()
     if args.videos:
         args.videos = [v.strip() for v in args.videos.split(",") if v.strip()]
+    if args.sources:
+        args.sources = [s.strip() for s in args.sources.split(",") if s.strip()]
     assert DOCS.exists(), f"run video_documents.py first ({DOCS} missing)"
 
     from openai import OpenAI
