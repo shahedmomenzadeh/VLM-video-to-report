@@ -22,6 +22,11 @@ MAX_FRAMES="${MAX_FRAMES:-32}"
 OUTZIP="${OUTZIP:-/kaggle/working/${MODEL_TAG}-results.zip}"
 
 echo ">>> GPU check"
+if ! command -v nvidia-smi >/dev/null; then
+  echo "ERROR: nvidia-smi not found -- this session has no GPU."
+  echo "Enable one via Notebook settings: Settings > Accelerator > GPU, then rerun."
+  exit 1
+fi
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 
 echo ">>> pip deps (torch first: Kaggle images usually ship CUDA torch)"
