@@ -80,6 +80,8 @@ def done_keys(path: Path, key: tuple) -> set:
         for line in open(path):
             try:
                 r = json.loads(line)
+                if "error" in r:
+                    continue  # failed calls retry instead of poisoning resume
                 done.add(tuple(r[k] for k in key))
             except (json.JSONDecodeError, KeyError):
                 pass
