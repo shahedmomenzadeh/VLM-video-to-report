@@ -88,11 +88,16 @@ class LingshuBackend(VideoBackend):
 
         total = self._clip_frame_count(video_path)
         effective = max_frames if total is None else max(2, min(max_frames, total))
+        if total is not None:
+            # qwen-vl-utils rounds requested nframes to a multiple of 2:
+            # an odd n on a tiny odd-length clip overshoots the decodable
+            # count (seen: requesting 4 from a 3-frame clip). Floor to even.
+            effective = max(2, (effective // 2) * 2)
         ladder = []
         f = effective
         while f >= 2:
             ladder.append(f)
-            f //= 2
+            f = f // 2 if f > 3 else f - 1
         if not ladder:
             ladder = [2]
 

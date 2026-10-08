@@ -72,6 +72,11 @@ class Qwen3VLBackend(VideoBackend):
         processor, model = ctx
         total = self._clip_frame_count(video_path)
         n = max_frames if total is None else max(2, min(max_frames, total))
+        if total is not None:
+            # qwen-vl-utils rounds requested nframes to a multiple of 2:
+            # an odd n on a tiny odd-length clip overshoots the decodable
+            # count (seen: requesting 4 from a 3-frame clip). Floor to even.
+            n = max(2, (n // 2) * 2)
         last_err = None
         with torch.no_grad():
             while n >= 2:
@@ -95,7 +100,7 @@ class Qwen3VLBackend(VideoBackend):
                     last_err = e
                     gc.collect()
                     torch.cuda.empty_cache()
-                    n //= 2
+                    n = n // 2 if n > 3 else n - 1
                 except (ValueError, AttributeError) as e:
                     # ValueError(nframes): asked for more frames than the clip
                     # decodes. AttributeError(read_video): qwen_vl_utils'
@@ -107,5 +112,5 @@ class Qwen3VLBackend(VideoBackend):
                     last_err = e
                     gc.collect()
                     torch.cuda.empty_cache()
-                    n //= 2
+                    n = n // 2 if n > 3 else n - 1
         raise RuntimeError(f"Failed even at 2 frames: {last_err}")
