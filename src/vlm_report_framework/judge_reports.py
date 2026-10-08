@@ -26,7 +26,9 @@ import argparse
 import base64
 import json
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -104,6 +106,29 @@ def candidate_sources(include_teacher_self: bool = False) -> list[tuple[str, str
     return out
 
 
+def _score_one(args, client, system, vid: str, src: str, p: Path) -> dict:
+    """One scoring call; pure worker (no shared state except the client)."""
+    prompt = build_scoring_prompt(p.read_text(), evidence_for(vid),
+                                  version=args.prompt_version)
+    vpath = (REPO / "videos" / vid / f"{vid}.mp4") if args.video_full else None
+    try:
+        raw, dt = call_judge(client, args.model, prompt, vpath,
+                             args.temperature, args.max_tokens,
+                             system=system)
+        parsed = parse_json_loose(raw)
+        return {"video_id": vid, "source": src, "judge": args.model,
+                "prompt_version": args.prompt_version,
+                **{k: parsed.get(k) for k in (
+                    "groundedness", "completeness",
+                    "instrument_correctness", "temporal_coherence",
+                    "echo_flag", "reason")},
+                "latency_s": round(dt, 1)}
+    except Exception as e:  # noqa: BLE001 — store failure, keep going
+        return {"video_id": vid, "source": src, "judge": args.model,
+                "prompt_version": args.prompt_version,
+                "error": str(e)[:300]}
+
+
 def run_score(args, client) -> None:
     out_dir = OUT_SCORE / args.judge_tag
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -114,33 +139,37 @@ def run_score(args, client) -> None:
              candidate_sources(args.include_teacher_self)
              if (not args.videos or v in args.videos)
              and (not args.sources or any(x in s for x in args.sources))]
+    todo = []
     for vid, src, p in cands:
         if (vid, src, args.prompt_version) in done:
             print(f"-- skip {vid} {src} {args.prompt_version} (done)")
             continue
-        prompt = build_scoring_prompt(p.read_text(), evidence_for(vid),
-                                      version=args.prompt_version)
-        vpath = (REPO / "videos" / vid / f"{vid}.mp4") if args.video_full else None
-        print(f"=== score {vid} {src} [{args.prompt_version}] ===", flush=True)
-        try:
-            raw, dt = call_judge(client, args.model, prompt, vpath,
-                                 args.temperature, args.max_tokens,
-                                 system=system)
-            parsed = parse_json_loose(raw)
-            row = {"video_id": vid, "source": src, "judge": args.model,
-                   "prompt_version": args.prompt_version,
-                   **{k: parsed.get(k) for k in (
-                       "groundedness", "completeness",
-                       "instrument_correctness", "temporal_coherence",
-                       "echo_flag", "reason")},
-                   "latency_s": round(dt, 1)}
-        except Exception as e:  # noqa: BLE001 — store failure, keep going
-            row = {"video_id": vid, "source": src, "judge": args.model,
-                   "prompt_version": args.prompt_version,
-                   "error": str(e)[:300]}
-            print(f"  WARN: {e}", flush=True)
-        with open(master, "a") as f:
+        todo.append((vid, src, p))
+    lock = threading.Lock()
+
+    def store(row: dict) -> None:
+        with lock, open(master, "a") as f:
             f.write(json.dumps(row) + "\n")
+
+    if args.workers <= 1:
+        for vid, src, p in todo:
+            print(f"=== score {vid} {src} [{args.prompt_version}] ===", flush=True)
+            row = _score_one(args, client, system, vid, src, p)
+            if "error" in row:
+                print(f"  WARN: {row['error']}", flush=True)
+            store(row)
+    else:
+        with ThreadPoolExecutor(max_workers=args.workers) as pool:
+            futs = {pool.submit(_score_one, args, client, system, vid, src, p): (vid, src)
+                    for vid, src, p in todo}
+            for fut in as_completed(futs):
+                vid, src = futs[fut]
+                row = fut.result()
+                if "error" in row:
+                    print(f"  WARN {vid} {src}: {row['error']}", flush=True)
+                else:
+                    print(f"  done {vid} {src} [{args.prompt_version}]", flush=True)
+                store(row)
     print(f"Done. {master.relative_to(REPO)}")
 
 
@@ -221,6 +250,11 @@ def main() -> None:
                     help="attach full surgery mp4 as judge video evidence")
     ap.add_argument("--temperature", type=float, default=0.0)
     ap.add_argument("--max-tokens", type=int, default=512)
+    ap.add_argument("--workers", type=int, default=1,
+                    help="parallel judge calls in score mode (default 1, "
+                         "sequential). The OpenAI client is thread-safe; "
+                         "writes are lock-guarded and resume still skips "
+                         "clean rows.")
     args = ap.parse_args()
     if args.videos:
         args.videos = [v.strip() for v in args.videos.split(",") if v.strip()]
