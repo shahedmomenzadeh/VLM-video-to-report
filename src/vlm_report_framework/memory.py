@@ -58,8 +58,16 @@ def update_memory(
             seen[cls] = chunk_id
     prev_nonidle = (report if phase_id not in idle_phases
                     else mem.get("prev_nonidle_report", ""))
-    flags = mem.get("flags", []) + [f for f in (flags_add or [])
-                                    if f not in mem.get("flags", [])]
+    flags = list(mem.get("flags", []))
+    for f in (flags_add or []):
+        # Normalize: older snapshots / raw model outputs may hold dict flags.
+        if isinstance(f, dict):
+            import json as _json
+            f = _json.dumps(f)
+        elif not isinstance(f, str):
+            f = str(f)
+        if f not in flags:
+            flags.append(f)
     return {"running_summary": summary, "prev_report": report[:VERBATIM_CAP],
             "prev_nonidle_report": prev_nonidle[:VERBATIM_CAP],
             "phase_trail": trail, "instruments_seen": seen, "flags": flags,

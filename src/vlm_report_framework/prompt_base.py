@@ -6,6 +6,8 @@ everything here is identical across pipelines and models.
 """
 from __future__ import annotations
 
+import json
+
 # Raw YOLO class name -> human surgical term shown to VLMs.
 INSTRUMENT_LABELS: dict[str, str] = {
     "Cannula": "cannula",
@@ -72,7 +74,11 @@ def background_block(memory: dict) -> str:
                       + ", ".join(f"{k} (last: {v})"
                                   for k, v in memory["instruments_seen"].items()))
     if memory.get("flags"):
-        struct.append("Known events: " + "; ".join(memory["flags"]))
+        # Defensive: snapshots written before the coerce fix may hold dict
+        # flags (Lingshu returns objects). Never let join() see a dict.
+        safe = [f if isinstance(f, str) else json.dumps(f)
+                for f in memory["flags"]]
+        struct.append("Known events: " + "; ".join(safe))
     if struct:
         bg.append("\n".join(struct))
     if not bg:

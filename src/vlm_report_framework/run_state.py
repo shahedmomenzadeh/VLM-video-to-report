@@ -119,6 +119,22 @@ def coerce_report(parsed: dict, raw: str) -> tuple[str, str, list]:
         memory_update = str(memory_update)
     if not isinstance(flags_add, list):
         flags_add = [flags_add]
+    clean = []
+    for f in flags_add:
+        if f is None:
+            continue
+        if isinstance(f, str):
+            s = f.strip()
+            if s:
+                clean.append(s)
+        elif isinstance(f, dict):
+            # Some VLMs (observed: Lingshu-7B) return flags_add as a list of
+            # objects, e.g. [{"event": ...}]. Coerce to compact JSON strings
+            # so downstream "; ".join() never sees a dict.
+            clean.append(json.dumps(f))
+        else:
+            clean.append(str(f))
+    flags_add = clean
     if not report:
         report = raw if isinstance(raw, str) else json.dumps(raw)
     return report, memory_update, flags_add
