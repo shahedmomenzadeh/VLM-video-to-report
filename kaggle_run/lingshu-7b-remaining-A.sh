@@ -23,7 +23,7 @@ MODEL_DIR="models/Lingshu-7B"
 MODEL_TAG="lingshu-7b"
 BACKEND="lingshu"
 VIDEOS="${VIDEOS:-PH_0075_1093_S1,PH_0077_1150_S1,PH_0078_1160_S1,PH_0081_1188_S1,PH_0084_1203_S1}"
-MAX_FRAMES="${MAX_FRAMES:-32}"
+MAX_FRAMES="${MAX_FRAMES:-16}"  # 16 not 32: 32 frames OOMs 7B on 16GB cards, doubling every chunk via the halve-and-retry ladder
 OUTZIP="${OUTZIP:-/kaggle/working/lingshu-7b-remaining-A.zip}"
 
 echo ">>> GPU check"
