@@ -191,41 +191,76 @@ def pairwise_contrasts() -> list[tuple[str, str, str, str]]:
     return out
 
 
+def _pair_one(args, client, vid: str, la: str, lb: str, order: str,
+              xa: str, xb: str, note: str, docs: dict, ev: str) -> dict:
+    """One pairwise call; pure worker (no shared state except the client)."""
+    prompt = build_pairwise_prompt(docs[(vid, xa)].read_text(),
+                                   docs[(vid, xb)].read_text(), ev)
+    try:
+        raw, dt = call_judge(client, args.model, prompt, None,
+                             args.temperature, args.max_tokens)
+        parsed = parse_json_loose(raw)
+        winner = parsed.get("winner")
+        # normalize to la/lb frame
+        if order == "BA" and winner in ("A", "B"):
+            winner = "B" if winner == "A" else "A"
+        return {"video_id": vid, "label_a": la, "label_b": lb,
+                "order": order, "note": note, "judge": args.model,
+                "winner": winner, "reason": parsed.get("reason"),
+                "latency_s": round(dt, 1)}
+    except Exception as e:  # noqa: BLE001
+        return {"video_id": vid, "label_a": la, "label_b": lb,
+                "order": order, "note": note, "error": str(e)[:300]}
+
+
 def run_pairwise(args, client) -> None:
     out_dir = OUT_PAIR / args.judge_tag
     out_dir.mkdir(parents=True, exist_ok=True)
     master = out_dir / "pairs.jsonl"
     done = done_keys(master, ("video_id", "label_a", "label_b", "order"))
     docs = {(v, s): p for v, s, p in candidate_sources()}
+    tasks = []
     for vid, la, lb, note in pairwise_contrasts():
         if args.videos and vid not in args.videos:
+            continue
+        if args.sources and not any(x in la or x in lb for x in args.sources):
             continue
         ev = evidence_for(vid)
         for order, (xa, xb) in (("AB", (la, lb)), ("BA", (lb, la))):
             if (vid, la, lb, order) in done:
                 print(f"-- skip {vid} {la}-vs-{lb} {order} (done)")
                 continue
-            prompt = build_pairwise_prompt(docs[(vid, xa)].read_text(),
-                                           docs[(vid, xb)].read_text(), ev)
+            tasks.append((vid, la, lb, order, xa, xb, note, ev))
+    lock = threading.Lock()
+
+    def store(row: dict) -> None:
+        with lock, open(master, "a") as f:
+            f.write(json.dumps(row) + "\n")
+
+    def run(task: tuple) -> dict:
+        vid, la, lb, order, xa, xb, note, ev = task
+        return _pair_one(args, client, vid, la, lb, order, xa, xb, note, docs, ev)
+
+    if args.workers <= 1:
+        for task in tasks:
+            vid, la, lb, order, xa, xb, note, _ = task
             print(f"=== pair {vid} {xa}-vs-{xb} ===", flush=True)
-            try:
-                raw, dt = call_judge(client, args.model, prompt, None,
-                                     args.temperature, args.max_tokens)
-                parsed = parse_json_loose(raw)
-                winner = parsed.get("winner")
-                # normalize to la/lb frame
-                if order == "BA" and winner in ("A", "B"):
-                    winner = "B" if winner == "A" else "A"
-                row = {"video_id": vid, "label_a": la, "label_b": lb,
-                       "order": order, "note": note, "judge": args.model,
-                       "winner": winner, "reason": parsed.get("reason"),
-                       "latency_s": round(dt, 1)}
-            except Exception as e:  # noqa: BLE001
-                row = {"video_id": vid, "label_a": la, "label_b": lb,
-                       "order": order, "note": note, "error": str(e)[:300]}
-                print(f"  WARN: {e}", flush=True)
-            with open(master, "a") as f:
-                f.write(json.dumps(row) + "\n")
+            row = run(task)
+            if "error" in row:
+                print(f"  WARN: {row['error']}", flush=True)
+            store(row)
+    else:
+        with ThreadPoolExecutor(max_workers=args.workers) as pool:
+            futs = {pool.submit(run, t): t for t in tasks}
+            for fut in as_completed(futs):
+                vid, la, lb, order, xa, xb, note, _ = futs[fut]
+                row = fut.result()
+                if "error" in row:
+                    print(f"  WARN {vid} {xa}-vs-{xb}: {row['error']}", flush=True)
+                else:
+                    print(f"  done {vid} {xa}-vs-{xb} winner={row.get('winner')}",
+                          flush=True)
+                store(row)
     print(f"Done. {master.relative_to(REPO)}")
 
 
