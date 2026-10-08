@@ -15,6 +15,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Force decord video reading in qwen-vl-utils: torchcodec chokes on
+# sub-second clips and its hardcoded torchvision fallback calls
+# io.read_video, removed in torchvision>=0.24 (Kaggle images).
+export FORCE_QWENVL_VIDEO_READER=decord
+
 VIDEOS="${VIDEOS:-PH_0134_2178_S1,PH_0136_2243_S1,PH_0144_2448_S1,PH_0146_2452_S1}"
 MAX_FRAMES="${MAX_FRAMES:-32}"
 OUTDIR="${OUTDIR:-/kaggle/working}"

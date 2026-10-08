@@ -13,6 +13,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Force decord video reading in qwen-vl-utils: torchcodec chokes on
+# sub-second clips and its hardcoded torchvision fallback calls
+# io.read_video, removed in torchvision>=0.24 (Kaggle images).
+export FORCE_QWENVL_VIDEO_READER=decord
+
 MODEL_ID="shahedm2001/qwen3-vl-2b-cataract-sft-stage2"
 MODEL_DIR="models/qwen3-vl-2b-cataract-sft-stage2"
 MODEL_TAG="qwen3vl-2b-sft-stage2"
