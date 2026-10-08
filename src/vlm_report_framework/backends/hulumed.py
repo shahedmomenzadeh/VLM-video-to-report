@@ -82,6 +82,15 @@ class HuluMedBackend(VideoBackend):
         frame_size = gen.get("frame_size", 480)
 
         total = self._clip_frame_count(video_path)
+        # fps-based sampling yields ~duration*fps frames: a sub-second clip
+        # at fps=1.0 decodes to 0-1 frames and the processor's image resize
+        # crashes with bare IndexError (seen on a 0.7s P13 chunk). Guarantee
+        # ~3 sampled frames by raising fps for short clips (max_frames still
+        # caps the total, so long clips are unaffected).
+        duration = self._clip_duration(video_path)
+        fps_eff = fps
+        if duration and duration > 0:
+            fps_eff = max(fps, min(8.0, 3.0 / duration))
         effective = max_frames if total is None else max(2, min(max_frames, total))
         ladder = []
         f = effective
@@ -97,7 +106,7 @@ class HuluMedBackend(VideoBackend):
                 "role": "user",
                 "content": [
                     {"type": "video", "video": {
-                        "video_path": video_path, "fps": fps,
+                        "video_path": video_path, "fps": fps_eff,
                         "max_frames": attempt, "size": frame_size}},
                     {"type": "text", "text": prompt}]}]
             try:
@@ -129,12 +138,17 @@ class HuluMedBackend(VideoBackend):
                 last_err = e
                 gc.collect()
                 torch.cuda.empty_cache()
-            except (ValueError, AttributeError) as e:
-                if "nframes" not in str(e) and "read_video" not in str(e):
-                    raise
-                last_err = e
-                gc.collect()
-                torch.cuda.empty_cache()
+            except (ValueError, AttributeError, IndexError) as e:
+                msg = str(e)
+                if isinstance(e, IndexError) or "nframes" in msg \
+                        or "read_video" in msg:
+                    # Short-clip empty decode: sample denser and retry.
+                    fps_eff = min(fps_eff * 2.0, 16.0)
+                    last_err = e
+                    gc.collect()
+                    torch.cuda.empty_cache()
+                    continue
+                raise
         gc.collect()
         torch.cuda.empty_cache()
         raise RuntimeError(f"HuluMed failed even at 2 frames: {last_err}")
@@ -146,3 +160,15 @@ class HuluMedBackend(VideoBackend):
             return len(VideoReader(video_path))
         except Exception:
             return None
+
+    @staticmethod
+    def _clip_duration(video_path: str) -> float | None:
+        try:
+            from decord import VideoReader
+            vr = VideoReader(video_path)
+            fps = vr.get_avg_fps()
+            if fps and fps > 0:
+                return len(vr) / float(fps)
+        except Exception:
+            pass
+        return None
