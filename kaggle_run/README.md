@@ -17,6 +17,7 @@ always downloadable if a session dies; reruns resume finished chunks.
 | script | model | backend | notes |
 |---|---|---|---|
 | `qwen3vl-2b-instruct.sh` | Qwen/Qwen3-VL-2B-Instruct | qwen3vl | 32 frames |
+| `qwen3vl-4b-instruct.sh` | Qwen/Qwen3-VL-4B-Instruct | qwen3vl | 32 frames, 4-bit (fits 8GB+) |
 | `qwen3vl-2b-sft-stage2.sh` | shahedm2001/qwen3-vl-2b-cataract-sft-stage2 | qwen3vl | essentials-only download |
 | `qwen3vl-2b-grpo.sh` | shahedm2001/qwen3-vl-2b-cataract-grpo | qwen3vl | essentials-only download |
 | `hulumed-4b.sh` | ZJU-AI4H/Hulu-Med-4B | hulumed | **16 frames @ 224px**, temp 0.6 (32f@480px exceeds its 16k context + OOMs on 8GB) |
