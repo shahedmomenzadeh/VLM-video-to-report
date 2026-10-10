@@ -40,3 +40,5 @@ hf_home/
 .venv-vlm/
 # Kaggle/local model downloads (regenerable)
 models/
+# Eval archives (regenerable bundles)
+archives/
