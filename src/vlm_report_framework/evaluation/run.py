@@ -79,6 +79,45 @@ def cmd_evidence(a):
             print(f"  [{row['verdict']}] {row['claim'][:110]}")
 
 
+def cmd_temporal(a):
+    from evaluation import temporal as tp
+    for tag in (a.tags.split(",") if a.tags else ingest.discover_tags()):
+        for setting in (a.settings.split(",") if a.settings else ("s1", "s2", "s3")):
+            rows = tp.score_transitions(tag, setting, a.video, a.run_id)
+            if not rows:
+                continue
+            n = len(rows)
+            print(f"{tag}.{setting}: transitions={n} "
+                  f"contr={sum(r['contradiction'] for r in rows)} "
+                  f"contam={sum(r['contamination'] for r in rows)} "
+                  f"stale={sum(r['stale_instrument'] for r in rows)} "
+                  f"redun={sum(r['redundant'] for r in rows)}")
+
+
+def cmd_phase(a):
+    from evaluation import aggregate as ag
+    vids = a.videos.split(",") if a.videos != "all" else [
+        p.name for p in Path("videos").glob("PH_*") if p.is_dir()]
+    for tag in (a.tags.split(",") if a.tags else ingest.discover_tags()):
+        accs = []
+        for v in vids:
+            m = ag.phase_metrics_s1(tag, v)
+            if m:
+                accs.append(m["accuracy"])
+        import statistics
+        print(f"{tag}: s1 videos={len(accs)} "
+              f"mean_acc={round(statistics.mean(accs), 3) if accs else '-'}")
+
+
+def cmd_report(a):
+    from evaluation import report as rp
+    vids = a.videos.split(",") if a.videos != "all" else sorted(
+        p.name for p in Path("videos").glob("PH_*") if p.is_dir())
+    tags = a.tags.split(",") if a.tags else ingest.discover_tags()
+    out = rp.build(a.run_id, vids, tags)
+    print(f"panels={len(out['panels'])} -> {out['out']}/summary.md")
+
+
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -92,9 +131,18 @@ def main():
     p.add_argument("--chunk", required=True); p.add_argument("--run-id", default="pilot")
     p.add_argument("--tag", default=""); p.add_argument("--setting", default="s3")
     p.add_argument("--score", action="store_true")
+    p = sub.add_parser("temporal"); p.add_argument("--video", required=True)
+    p.add_argument("--tags", default=""); p.add_argument("--settings", default="s3")
+    p.add_argument("--run-id", default="pilot")
+    p = sub.add_parser("phase"); p.add_argument("--videos", default="all")
+    p.add_argument("--tags", default="")
+    p = sub.add_parser("report"); p.add_argument("--videos", default="all")
+    p.add_argument("--tags", default=""); p.add_argument("--run-id", default="pilot")
     a = ap.parse_args()
     {"inventory": cmd_inventory, "reliability": cmd_reliability,
-     "reference": cmd_reference, "evidence": cmd_evidence}[a.cmd](a)
+     "reference": cmd_reference, "evidence": cmd_evidence,
+     "temporal": cmd_temporal, "phase": cmd_phase,
+     "report": cmd_report}[a.cmd](a)
 
 
 if __name__ == "__main__":
