@@ -39,6 +39,26 @@ def done_claims(path: Path) -> set[str]:
     return done
 
 
+def find_evidence(vid: str, cid: str, run_id: str) -> dict | None:
+    """Shared evidence lookup: run_id cache, else older runs' (copied forward)."""
+    import shutil as _sh
+    cands = [OUT_EVAL / run_id / "evidence" / f"{vid}__{cid}.json"]
+    cands += [OUT_EVAL / fb / "evidence" / f"{vid}__{cid}.json"
+              for fb in ("full25", "full5", "pilot") if fb != run_id]
+    for i, p in enumerate(cands):
+        if p.exists():
+            try:
+                rec = json.load(open(p))
+            except Exception:
+                continue
+            if i > 0:
+                dest = cands[0]
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                _sh.copyfile(p, dest)
+            return rec
+    return None
+
+
 def run_evidence(videos: list[str], run_id: str, workers: int) -> None:
     chunks = all_chunks(videos)
     print(f"evidence: {len(chunks)} chunks, workers={workers}", flush=True)
@@ -58,7 +78,10 @@ def run_evidence(videos: list[str], run_id: str, workers: int) -> None:
     print("evidence done", flush=True)
 
 
-def run_claims(videos: list[str], tags: list[str], run_id: str, workers: int) -> None:
+def run_claims(videos: list[str], tags: list[str], run_id: str, workers: int,
+               mode: str = "tier1") -> None:
+    cdir = "claims_t1" if mode == "tier1" else "claims"
+    score_fn = ev.score_report_tier1 if mode == "tier1" else ev.score_report
     tasks = []
     for tag in tags:
         for setting in ("s1", "s2", "s3"):
@@ -67,25 +90,24 @@ def run_claims(videos: list[str], tags: list[str], run_id: str, workers: int) ->
                 if not mp.exists():
                     continue
                 rows = [json.loads(l) for l in open(mp)]
-                out = OUT_EVAL / run_id / "claims" / f"{vid}.{tag}.{setting}.jsonl"
+                out = OUT_EVAL / run_id / cdir / f"{vid}.{tag}.{setting}.jsonl"
                 done = done_claims(out)
                 evcache: dict[str, dict] = {}
                 for r in rows:
                     if r.get("chunk_id") not in done:
                         tasks.append((tag, setting, vid, r.get("chunk_id", ""),
                                       r.get("report", ""), out))
-    print(f"claims: {len(tasks)} reports to score, workers={workers}", flush=True)
+    print(f"claims ({mode}): {len(tasks)} reports to score, workers={workers}", flush=True)
     lock = threading.Lock()
-    (OUT_EVAL / run_id / "claims").mkdir(parents=True, exist_ok=True)
+    (OUT_EVAL / run_id / cdir).mkdir(parents=True, exist_ok=True)
 
     def one(t):
         tag, setting, vid, cid, rep, out = t
-        evp = OUT_EVAL / run_id / "evidence" / f"{vid}__{cid}.json"
-        if not evp.exists():
+        rec = find_evidence(vid, cid, run_id)
+        if rec is None:
             return f"WARN no-evidence {vid} {cid}"
-        rec = json.load(open(evp))
         try:
-            s = ev.score_report(rep, rec)
+            s = score_fn(rep, rec)
             row = {"video_id": vid, "tag": tag, "setting": setting,
                    "chunk_id": cid, "n_claims": s["n_claims"],
                    "support_rate": s["support_rate"],
@@ -106,14 +128,18 @@ def run_claims(videos: list[str], tags: list[str], run_id: str, workers: int) ->
     print("claims done", flush=True)
 
 
-def run_temporal(videos: list[str], tags: list[str], run_id: str, workers: int) -> None:
+def run_temporal(videos: list[str], tags: list[str], run_id: str, workers: int,
+                 mode: str = "tier1") -> None:
     tasks = [(t, s, v) for t in tags for s in ("s1", "s2", "s3") for v in videos]
-    print(f"temporal: {len(tasks)} chains, workers={workers}", flush=True)
+    print(f"temporal ({mode}): {len(tasks)} chains, workers={workers}", flush=True)
 
     def one(t):
         tag, setting, vid = t
         try:
-            rows = temporal.score_transitions(tag, setting, vid, run_id)
+            if mode == "tier1":
+                rows = temporal.score_chain(tag, setting, vid, run_id)
+            else:
+                rows = temporal.score_transitions(tag, setting, vid, run_id)
             n = len(rows)
             return (f"ok {vid}.{tag}.{setting}: tr={n} "
                     f"contr={sum(r['contradiction'] for r in rows)} "
@@ -143,6 +169,9 @@ def main() -> None:
     ap.add_argument("--skip-evidence", action="store_true")
     ap.add_argument("--skip-claims", action="store_true")
     ap.add_argument("--skip-temporal", action="store_true")
+    ap.add_argument("--mode", choices=("tier1", "atomic"), default="tier1",
+                        help="tier1: 1 call/report + 1 call/chain; atomic: Tier-2 "
+                             "split+verdicts + per-pair (calibration subset)")
     a = ap.parse_args()
     videos = [v.strip() for v in a.videos.split(",") if v.strip()]
     tags = [t.strip() for t in a.tags.split(",") if t.strip()] or ingest.discover_tags()
@@ -152,9 +181,9 @@ def main() -> None:
     if not a.skip_evidence:
         run_evidence(videos, a.run_id, vlm_w)
     if not a.skip_claims:
-        run_claims(videos, tags, a.run_id, llm_w)
+        run_claims(videos, tags, a.run_id, llm_w, a.mode)
     if not a.skip_temporal:
-        run_temporal(videos, tags, a.run_id, llm_w)
+        run_temporal(videos, tags, a.run_id, llm_w, a.mode)
     print(f"Done -> output-evaluation/{a.run_id}")
 
 

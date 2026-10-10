@@ -53,9 +53,56 @@ def judge_transition(prev: dict, curr: dict) -> dict:
                 "progression": 2, "why": f"parse-fail:{e}"[:150]}
 
 
-def score_transitions(tag: str, setting: str, video_id: str,
-                      run_id: str) -> list[dict]:
-    out = OUT_EVAL / run_id / "transitions" / f"{video_id}.{tag}.{setting}.jsonl"
+CHAIN_SYSTEM = ("You audit a sequence of consecutive surgical-chunk reports. "
+                "Flag only clear errors, not stylistic overlap.")
+CHAIN_CONTRACT = """Respond with ONLY a JSON object, no other text:
+{"transitions": [{"prev": "<chunk_id>", "curr": "<chunk_id>",
+"contradiction": bool, "contamination": bool, "stale_instrument": bool,
+"redundant": bool, "progression": 1|2|3}]} — one entry per CONSECUTIVE pair
+in order. contradiction = curr flips a persistent state; contamination = past
+event restated as current; stale_instrument = tool carried with no support;
+redundant = adds nothing; progression 1 = restart/error, 2 = static/legit
+continuation, 3 = clear progress."""
+
+
+def score_chain(tag: str, setting: str, video_id: str, run_id: str) -> list[dict]:
+    """Tier 1: ONE call per (video, tag, setting) chain (~30 pairs per call)."""
+    out = OUT_EVAL / run_id / "transitions_t1" / f"{video_id}.{tag}.{setting}.json"
+    if out.exists():
+        try:
+            return json.load(open(out))["transitions"]
+        except Exception:
+            pass
+    rows = _rows(tag, setting, video_id)
+    if len(rows) < 2:
+        return []
+    parts = []
+    for prev, curr in zip(rows, rows[1:]):
+        parts.append(f"--- {prev.get('chunk_id')} -> {curr.get('chunk_id')} ---\n"
+                     f"PREV [{prev.get('phase')}]: {(prev.get('report') or '')[:700]}\n"
+                     f"CURR [{curr.get('phase')}]: {(curr.get('report') or '')[:700]}")
+    try:
+        raw, _ = _call(_client(), MODEL, CHAIN_SYSTEM,
+                       "\n\n".join(parts) + f"\n\n{CHAIN_CONTRACT}", None, 2048)
+        p = parse_json_loose(raw)
+        trans = p.get("transitions", [])
+        scored = [{"video_id": video_id, "tag": tag, "setting": setting,
+                   "prev": t.get("prev"), "curr": t.get("curr"),
+                   "same_phase": None,
+                   "contradiction": bool(t.get("contradiction", False)),
+                   "contamination": bool(t.get("contamination", False)),
+                   "stale_instrument": bool(t.get("stale_instrument", False)),
+                   "redundant": bool(t.get("redundant", False)),
+                   "progression": int(t.get("progression", 2)),
+                   "why": ""} for t in trans if isinstance(t, dict)]
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps({"video_id": video_id, "tag": tag,
+                                   "setting": setting, "transitions": scored},
+                                  indent=1))
+        return scored
+    except Exception as e:
+        return [{"video_id": video_id, "tag": tag, "setting": setting,
+                 "prev": None, "curr": None, "error": str(e)[:200]}]
     if out.exists():
         return [json.loads(l) for l in open(out)]
     rows = _rows(tag, setting, video_id)
