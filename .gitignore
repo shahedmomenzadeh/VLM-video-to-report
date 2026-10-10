@@ -42,3 +42,5 @@ hf_home/
 models/
 # Eval archives (regenerable bundles)
 archives/
+# New post-hoc evaluation outputs (regenerable)
+output-evaluation/
