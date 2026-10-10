@@ -134,20 +134,27 @@ def main() -> None:
     ap.add_argument("--videos", required=True)
     ap.add_argument("--tags", default="")
     ap.add_argument("--run-id", default="full5")
-    ap.add_argument("--workers", type=int, default=8)
+    ap.add_argument("--workers", type=int, default=8,
+                        help="default for both pools unless overridden")
+    ap.add_argument("--vlm-workers", type=int, default=None,
+                        help="parallel VLM evidence calls (default: --workers)")
+    ap.add_argument("--llm-workers", type=int, default=None,
+                        help="parallel LLM claim/temporal calls (default: --workers)")
     ap.add_argument("--skip-evidence", action="store_true")
     ap.add_argument("--skip-claims", action="store_true")
     ap.add_argument("--skip-temporal", action="store_true")
     a = ap.parse_args()
     videos = [v.strip() for v in a.videos.split(",") if v.strip()]
     tags = [t.strip() for t in a.tags.split(",") if t.strip()] or ingest.discover_tags()
+    vlm_w = a.vlm_workers or a.workers
+    llm_w = a.llm_workers or a.workers
     OUT_EVAL.joinpath(a.run_id).mkdir(parents=True, exist_ok=True)
     if not a.skip_evidence:
-        run_evidence(videos, a.run_id, a.workers)
+        run_evidence(videos, a.run_id, vlm_w)
     if not a.skip_claims:
-        run_claims(videos, tags, a.run_id, a.workers)
+        run_claims(videos, tags, a.run_id, llm_w)
     if not a.skip_temporal:
-        run_temporal(videos, tags, a.run_id, a.workers)
+        run_temporal(videos, tags, a.run_id, llm_w)
     print(f"Done -> output-evaluation/{a.run_id}")
 
 
