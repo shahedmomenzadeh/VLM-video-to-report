@@ -76,6 +76,7 @@ def run_claims(videos: list[str], tags: list[str], run_id: str, workers: int) ->
                                       r.get("report", ""), out))
     print(f"claims: {len(tasks)} reports to score, workers={workers}", flush=True)
     lock = threading.Lock()
+    (OUT_EVAL / run_id / "claims").mkdir(parents=True, exist_ok=True)
 
     def one(t):
         tag, setting, vid, cid, rep, out = t
