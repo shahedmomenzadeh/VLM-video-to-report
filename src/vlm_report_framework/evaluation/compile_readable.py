@@ -36,8 +36,11 @@ Rules:
 - Exact section format, repeated for every section:
 ## PXX: Phase Name
 [MM:SS.ss-MM:SS.ss]: narrative paragraph for that span
-- Time spans MUST be copied from the chunk headers. The first span starts at
+- Time spans MUST be copied verbatim from the chunk headers below (they are
+  already in MM:SS.ss — no conversion needed). The first span starts at
   00:00.00 and the last span ends at the full video duration given above.
+- Output ONLY the report sections. No preamble, no timestamp math or
+  conversions, no commentary on what you did, no notes section.
 - DO NOT correct any evidence or claim: preserve every factual statement
   exactly as written, even where chunks contradict each other. If chunks
   disagree, keep both phrasings and mark with "(reports differ)".
@@ -55,8 +58,9 @@ def compile_video(tag: str, setting: str, vid: str) -> tuple[str, str]:
     rows.sort(key=lambda r: (r.get("t_start", 0), r.get("t_end", 0)))
     dur = max(r.get("t_end", 0) for r in rows)
     body = "\n\n".join(
-        f"[{r.get('chunk_id')} | {r.get('phase')} "
-        f"{r.get('t_start', 0):.1f}-{r.get('t_end', 0):.1f}s]\n{r.get('report', '')}"
+        f"[{r.get('chunk_id')} | {r.get('phase')} | "
+        f"{fmt_mmss(r.get('t_start', 0))}-{fmt_mmss(r.get('t_end', 0))}]\n"
+        f"{r.get('report', '')}"
         for r in rows)
     client = _client()
     t0 = time.time()
