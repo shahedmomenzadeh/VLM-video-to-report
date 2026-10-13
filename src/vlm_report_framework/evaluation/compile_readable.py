@@ -26,23 +26,34 @@ OUT = REPO / "output-readable"
 
 SYSTEM = ("You are a surgical report editor. You reorganize operative notes "
           "into a readable report. You never add facts.")
-CONTRACT = """Rewrite the chunk reports below as ONE readable operative report.
+CONTRACT = """Rewrite the chunk reports below as ONE readable operative report that
+narrates the video from start to finish IN TEMPORAL ORDER.
 Rules:
-- Group by surgical phase in temporal order; merge duplicated statements.
+- Emit one section per video chunk, in the given order. You MAY merge
+  consecutive same-phase chunks into a single section with the combined span.
+- NEVER reorder or group by phase: Idle sections stay exactly where they
+  occur in the video. Do not collect all Idles together.
+- Exact section format, repeated for every section:
+## PXX: Phase Name
+[MM:SS.ss-MM:SS.ss]: narrative paragraph for that span
+- Time spans MUST be copied from the chunk headers. The first span starts at
+  00:00.00 and the last span ends at the full video duration given above.
 - DO NOT correct any evidence or claim: preserve every factual statement
   exactly as written, even where chunks contradict each other. If chunks
   disagree, keep both phrasings and mark with "(reports differ)".
 - Restructure prose and flow ONLY. Add NO new facts, tools, actions, timings,
-  or interpretations.
-- Structure: brief header (video id, phase span), then one section per phase
-  with time span, instruments, and a short narrative paragraph.
-- Plain markdown, no JSON."""
+  or interpretations. Plain markdown, no JSON."""
+
+
+def fmt_mmss(t: float) -> str:
+    return f"{int(t // 60):02d}:{t % 60:05.2f}"
 
 
 def compile_video(tag: str, setting: str, vid: str) -> tuple[str, str]:
     mp = REPO / "output-candidates" / tag / setting / f"{vid}_reports.jsonl"
     rows = [json.loads(l) for l in open(mp)]
     rows.sort(key=lambda r: (r.get("t_start", 0), r.get("t_end", 0)))
+    dur = max(r.get("t_end", 0) for r in rows)
     body = "\n\n".join(
         f"[{r.get('chunk_id')} | {r.get('phase')} "
         f"{r.get('t_start', 0):.1f}-{r.get('t_end', 0):.1f}s]\n{r.get('report', '')}"
@@ -53,7 +64,8 @@ def compile_video(tag: str, setting: str, vid: str) -> tuple[str, str]:
         model=MODEL, temperature=0.0, max_tokens=4096,
         messages=[{"role": "system", "content": SYSTEM},
                   {"role": "user", "content":
-                   f"Video {vid}, {len(rows)} chunks in order.\n\n{body}\n\n{CONTRACT}"}],
+                   f"Video {vid}, {len(rows)} chunks in order, full duration "
+                   f"{fmt_mmss(dur)}.\n\n{body}\n\n{CONTRACT}"}],
         timeout=600)
     text = resp.choices[0].message.content or ""
     header = (f"<!-- presentation only — compiled from {tag}/{setting} "

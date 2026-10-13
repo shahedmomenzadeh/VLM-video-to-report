@@ -60,13 +60,16 @@ def build_prompt(rows: list[dict], duration: float) -> str:
     return (
         f"Your own chunk reports for one cataract surgery "
         f"(full duration {fmt(duration)}), in order. Chunk boundaries:\n{table}\n\n"
-        f"{body}\n\nRewrite as ONE readable operative report, grouped by phase in "
-        f"temporal order. You MAY merge consecutive same-phase chunks into one "
-        f"section, but every section header MUST carry an exact 'MM:SS.ss-MM:SS.ss' "
-        f"time span copied from the chunk boundaries above. The first span must "
-        f"start at 00:00 and the last span MUST end at {fmt(duration)} — the report "
-        f"must cover the whole video. Merge duplicates, keep every factual claim, "
-        f"add no new facts, tools, or timings. Plain markdown.")
+        f"{body}\n\nRewrite as ONE readable operative report narrating the video "
+        f"from start to finish IN TEMPORAL ORDER. Emit one section per chunk in "
+        f"the given order; you MAY merge consecutive same-phase chunks into a "
+        f"single section with the combined span. NEVER reorder or group by phase: "
+        f"Idle sections stay exactly where they occur. Exact section format:\n"
+        f"## PXX: Phase Name\n[MM:SS.ss-MM:SS.ss]: narrative paragraph\n"
+        f"Every span MUST be copied from the chunk boundaries above. The first "
+        f"span must start at 00:00 and the last span MUST end at {fmt(duration)} "
+        f"— the report must cover the whole video. Merge duplicates, keep every "
+        f"factual claim, add no new facts, tools, or timings. Plain markdown.")
 
 
 def validate(text: str, rows: list[dict], duration: float) -> tuple[bool, list, list]:
@@ -100,7 +103,7 @@ def fallback_stitch(rows: list[dict]) -> str:
     over all merged chunks (never dropped — dropping breaks end-of-video
     coverage, the exact failure the timestamp validation guards).
     """
-    sections: list[list] = []  # [phase, t_start, t_end, act]
+    sections: list[list] = []  # [phase, phase_name, t_start, t_end, act]
     for r in rows:
         m = re.search(r"^Actions/events:(.*?)(?=^(?:Phase:|Observed instruments:"
                       r"|Candidate but not confirmed:|Anatomy visible:)|\Z)",
@@ -108,13 +111,15 @@ def fallback_stitch(rows: list[dict]) -> str:
         act = (m.group(1).strip() if m else "").replace("\n", " ")
         if not act:
             act = "(no parseable Actions/events section)"
-        if (sections and act == sections[-1][3]
+        if (sections and act == sections[-1][4]
                 and r.get("phase") == sections[-1][0]):
-            sections[-1][2] = r["t_end"]  # extend span, don't drop the chunk
+            sections[-1][3] = r["t_end"]  # extend span, don't drop the chunk
         else:
-            sections.append([r.get("phase"), r["t_start"], r["t_end"], act])
+            sections.append([r.get("phase"), r.get("phase_name", ""),
+                             r["t_start"], r["t_end"], act])
     return "\n\n".join(
-        f"### {ph} {fmt(a)}-{fmt(b)}\n{act}" for ph, a, b, act in sections)
+        f"## {ph}: {nm}\n[{fmt(a)}-{fmt(b)}]: {act}"
+        for ph, nm, a, b, act in sections)
 
 
 def generate_text_only(processor, model, prompt: str,
