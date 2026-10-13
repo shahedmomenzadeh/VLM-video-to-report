@@ -44,3 +44,6 @@ models/
 archives/
 # New post-hoc evaluation outputs (regenerable)
 output-evaluation/
+
+# Compiled readable reports (presentation only, regenerable)
+output-readable/
