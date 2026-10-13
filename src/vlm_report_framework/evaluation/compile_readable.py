@@ -29,9 +29,11 @@ SYSTEM = ("You are a surgical report editor. You reorganize operative notes "
 CONTRACT = """Rewrite the chunk reports below as ONE readable operative report.
 Rules:
 - Group by surgical phase in temporal order; merge duplicated statements.
-- Keep every factual claim (tools, anatomy, actions); drop boilerplate.
-- Add NO new facts, tools, actions, or timings. If chunks contradict each
-  other, keep both phrasings and mark with "(reports differ)".
+- DO NOT correct any evidence or claim: preserve every factual statement
+  exactly as written, even where chunks contradict each other. If chunks
+  disagree, keep both phrasings and mark with "(reports differ)".
+- Restructure prose and flow ONLY. Add NO new facts, tools, actions, timings,
+  or interpretations.
 - Structure: brief header (video id, phase span), then one section per phase
   with time span, instruments, and a short narrative paragraph.
 - Plain markdown, no JSON."""
