@@ -53,10 +53,10 @@ def video_duration(video_id: str) -> float:
 
 def build_prompt(rows: list[dict], duration: float) -> str:
     table = "\n".join(
-        f"- {r['chunk_id']} | {r.get('phase')} | {fmt(r['t_start'])}-{fmt(r['t_end'])}"
-        for r in rows)
+        f"- Chunk {i + 1} | {fmt(r['t_start'])}-{fmt(r['t_end'])}"
+        for i, r in enumerate(rows))
     body = "\n\n".join(
-        f"[{r['chunk_id']}]\n{r.get('report', '')}" for r in rows)
+        f"[Chunk {i + 1}]\n{r.get('report', '')}" for i, r in enumerate(rows))
     return (
         f"Your own chunk reports for one cataract surgery "
         f"(full duration {fmt(duration)}), in order. Chunk boundaries:\n{table}\n\n"
@@ -66,6 +66,9 @@ def build_prompt(rows: list[dict], duration: float) -> str:
         f"single section with the combined span. NEVER reorder or group by phase: "
         f"Idle sections stay exactly where they occur. Exact section format:\n"
         f"## PXX: Phase Name\n[MM:SS.ss-MM:SS.ss]: narrative paragraph\n"
+        f"The ## PXX header comes ONLY from the Phase: line inside each chunk "
+        f"report text. Chunk-N labels are IDs only, never phases. "
+        f"Output ONLY the report sections, never your deliberation. "
         f"Every span MUST be copied from the chunk boundaries above. The first "
         f"span must start at 00:00 and the last span MUST end at {fmt(duration)} "
         f"— the report must cover the whole video. Merge duplicates, keep every "

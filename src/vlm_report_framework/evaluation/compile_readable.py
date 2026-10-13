@@ -36,11 +36,17 @@ Rules:
 - Exact section format, repeated for every section:
 ## PXX: Phase Name
 [MM:SS.ss-MM:SS.ss]: narrative paragraph for that span
+- The `## PXX: Phase Name` header comes ONLY from the `Phase:` line INSIDE
+  each chunk's report text. The bracketed Chunk-N label is just an ID —
+  NEVER use it as a phase, NEVER discuss it, NEVER let it override the
+  report text.
 - Time spans MUST be copied verbatim from the chunk headers below (they are
   already in MM:SS.ss — no conversion needed). The first span starts at
   00:00.00 and the last span ends at the full video duration given above.
 - Output ONLY the report sections. No preamble, no timestamp math or
-  conversions, no commentary on what you did, no notes section.
+  conversions, no commentary, no reasoning, no notes section. NEVER output
+  your deliberation about conflicting labels — resolve silently using the
+  report text.
 - DO NOT correct any evidence or claim: preserve every factual statement
   exactly as written, even where chunks contradict each other. If chunks
   disagree, keep both phrasings and mark with "(reports differ)".
@@ -58,10 +64,10 @@ def compile_video(tag: str, setting: str, vid: str) -> tuple[str, str]:
     rows.sort(key=lambda r: (r.get("t_start", 0), r.get("t_end", 0)))
     dur = max(r.get("t_end", 0) for r in rows)
     body = "\n\n".join(
-        f"[{r.get('chunk_id')} | {r.get('phase')} | "
+        f"[Chunk {i + 1} | "
         f"{fmt_mmss(r.get('t_start', 0))}-{fmt_mmss(r.get('t_end', 0))}]\n"
         f"{r.get('report', '')}"
-        for r in rows)
+        for i, r in enumerate(rows))
     client = _client()
     t0 = time.time()
     resp = client.chat.completions.create(
