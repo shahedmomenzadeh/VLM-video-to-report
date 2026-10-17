@@ -2,7 +2,7 @@
 # Hulu-Med-4B on the 4 remaining videos.
 #
 # Run from a Kaggle notebook (GPU enabled) as:
-#   !git clone -b refactor-eval https://github.com/shahedmomenzadeh/VLM-video-to-report
+#   !git clone https://github.com/shahedmomenzadeh/VLM-video-to-report
 #   %cd VLM-video-to-report
 #   !bash kaggle_run/hulumed-4b-remaining.sh
 #

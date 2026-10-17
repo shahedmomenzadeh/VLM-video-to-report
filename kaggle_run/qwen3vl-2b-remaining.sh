@@ -2,7 +2,7 @@
 # Qwen3-VL-2B family (base + SFT-stage2 + GRPO) on the 4 remaining videos.
 #
 # Run from a Kaggle notebook (GPU enabled) as:
-#   !git clone -b refactor-eval https://github.com/shahedmomenzadeh/VLM-video-to-report
+#   !git clone https://github.com/shahedmomenzadeh/VLM-video-to-report
 #   %cd VLM-video-to-report
 #   !bash kaggle_run/qwen3vl-2b-remaining.sh
 #

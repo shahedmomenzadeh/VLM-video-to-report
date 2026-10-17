@@ -3,7 +3,7 @@
 # Run in parallel with lingshu-7b-remaining-A.sh on a second session. (backend: lingshu, Qwen2.5-VL family).
 #
 # Run from a Kaggle notebook (GPU enabled, 16GB class recommended for 7B) as:
-#   !git clone -b refactor-eval https://github.com/shahedmomenzadeh/VLM-video-to-report
+#   !git clone https://github.com/shahedmomenzadeh/VLM-video-to-report
 #   %cd VLM-video-to-report
 #   !bash kaggle_run/lingshu-7b-remaining-B.sh
 #

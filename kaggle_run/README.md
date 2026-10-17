@@ -10,14 +10,10 @@ The zip is rebuilt after **each video** (checkpoint), so partial results are
 always downloadable if a session dies; reruns resume finished chunks.
 
 ```bash
-!git clone -b refactor-eval https://github.com/shahedmomenzadeh/VLM-video-to-report
+!git clone https://github.com/shahedmomenzadeh/VLM-video-to-report
 %cd VLM-video-to-report
 !bash kaggle_run/qwen3vl-2b-grpo.sh
 ```
-
-Scripts must run on the **`refactor-eval`** (v2.1) branch — the default
-branch still carries the pre-v2.1 3-setting pipeline and would produce
-incompatible reports.
 
 | script | model | backend | notes |
 |---|---|---|---|
