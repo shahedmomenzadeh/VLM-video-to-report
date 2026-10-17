@@ -6,7 +6,7 @@
 #   %cd VLM-video-to-report
 #   !bash kaggle_run/lingshu-7b.sh
 #
-# Knobs (env): VIDEOS (default: pilot trio), MAX_FRAMES (default 32),
+# Knobs (env): VIDEOS (default: all 25 videos), MAX_FRAMES (default 16),
 #   OUTZIP, HF_TOKEN (optional). 4-bit quant is on; the backend halves
 #   frames automatically if VRAM runs out (see n_frames_used per row).
 set -euo pipefail

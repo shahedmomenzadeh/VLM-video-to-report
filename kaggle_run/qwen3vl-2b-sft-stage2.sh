@@ -6,7 +6,7 @@
 #   %cd VLM-video-to-report
 #   !bash kaggle_run/qwen3vl-2b-sft-stage2.sh
 #
-# Knobs (env): VIDEOS (default: pilot trio; "all" for the 25-video corpus),
+# Knobs (env): VIDEOS (default: all 25 videos; comma list for a subset),
 #   MAX_FRAMES (default 32), OUTZIP (default /kaggle/working/<tag>-results.zip),
 #   HF_TOKEN (optional; all repos used here are public).
 # Rerunning resumes (master tables skip finished chunks); the zip is rebuilt.

@@ -9,7 +9,7 @@
 # Operating point (evidence-based): 16 frames @ 224px, temp 0.6. On an 8GB
 # card, 32 frames @ 480px exceeds Hulu-Med's 16384-token context and OOMs
 # (17k tokens, 8.5GB alloc attempt); the reference run.sh likewise used 224.
-# Knobs (env): VIDEOS (default: pilot trio), OUTZIP, HF_TOKEN (optional).
+# Knobs (env): VIDEOS (default: all 25 videos), OUTZIP, HF_TOKEN (optional).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
