@@ -44,43 +44,107 @@ def fmt_time(t: float) -> str:
     return f"{int(m):02d}:{s:05.2f}"
 
 
-def background_block(memory: dict) -> str:
-    """BACKGROUND section: compressed full history + verbatim recent chunks.
+# Closed anatomy vocabulary (v2 contracts). Models must use these ids exactly;
+# renderer maps them to display terms. Keep minimal: only structures the
+# cataract microscope view can actually show.
+ANATOMY_TERMS: dict[str, str] = {
+    "cornea": "cornea",
+    "pupil": "pupil",
+    "iris": "iris",
+    "anterior_chamber": "anterior chamber",
+    "lens_capsule": "lens capsule",
+    "lens_nucleus": "lens nucleus",
+    "conjunctiva_eyelid": "conjunctiva/eyelids",
+    "incision_site": "incision site",
+}
 
-    Verbatim coverage: the immediately previous chunk always; plus the most
-    recent non-Idle chunk when it differs (i.e. previous was Idle) — the
-    scan-back rule. Both are labeled so the model treats them as context
-    only, never current evidence.
+# Phase id -> name (13-phase cataract ontology + P?? fallback for s1).
+PHASE_NAMES: dict[str, str] = {
+    "P01": "Incision", "P02": "Viscoelastic", "P03": "Capsulorhexis",
+    "P04": "Hydrodissection", "P05": "Phacoemulsification",
+    "P06": "Irrigation-Aspiration", "P07": "Capsule Polishing",
+    "P08": "Lens Implantation", "P09": "Lens Positioning",
+    "P10": "Viscoelastic Suction", "P11": "Anterior Chamber Flushing",
+    "P12": "Tonifying-Antibiotics", "P13": "Idle",
+}
+
+
+def candidate_block(rows: list[dict]) -> str:
+    """Single merged unconfirmed-candidate list with per-item evidence hints.
+
+    v2 replaces the two-group "Observed (strong evidence)" / "Candidate but
+    not confirmed" display: nothing is ever called confirmed. Each row shows
+    a strength hint the model must weigh visually, not trust.
+    Rows carry a 'hint' key ('strong'/'weak'); fall back to tier-agnostic
+    wording when absent.
     """
-    bg = []
-    if memory.get("running_summary"):
-        bg.append(f"Summary of earlier chunks:\n{memory['running_summary']}")
-    if memory.get("prev_report"):
-        trail = memory.get("phase_trail") or []
-        prev_idle = bool(trail) and trail[-1] in ("P13", "P??")
-        tag = (" (Idle — transition context only)"
-               if prev_idle else " (most recent action)")
-        bg.append(f"Report of immediately previous chunk{tag}:\n{memory['prev_report']}")
-    if (memory.get("prev_nonidle_report")
-            and memory["prev_nonidle_report"] != memory.get("prev_report")):
-        bg.append("Most recent NON-IDLE chunk "
-                  "(last substantive action, context only):\n"
-                  f"{memory['prev_nonidle_report']}")
-    struct = []
-    if memory.get("phase_trail"):
-        struct.append(f"Phase trail: {' -> '.join(memory['phase_trail'])}")
-    if memory.get("instruments_seen"):
-        struct.append("Instruments seen in earlier chunks: "
-                      + ", ".join(f"{k} (last: {v})"
-                                  for k, v in memory["instruments_seen"].items()))
-    if memory.get("flags"):
-        # Defensive: snapshots written before the coerce fix may hold dict
-        # flags (Lingshu returns objects). Never let join() see a dict.
-        safe = [f if isinstance(f, str) else json.dumps(f)
-                for f in memory["flags"]]
-        struct.append("Known events: " + "; ".join(safe))
-    if struct:
-        bg.append("\n".join(struct))
-    if not bg:
+    lines = []
+    for r in rows:
+        hint = r.get("hint", "")
+        tag = f" [{hint} hint" if hint else " [hint"
+        lines.append(
+            f"- {label(r['class_name'])} "
+            f"({r['n_frames']} frames, median conf {r['med_conf']:.2f}{tag}: "
+            f"unconfirmed proposal, verify visually)"
+        )
+    return "\n".join(lines)
+
+
+def strip_timestamps(text: str) -> str:
+    """Remove MM:SS(.ss) timestamp shapes so time never leaks via memory."""
+    import re as _re
+    return _re.sub(r"\d{1,2}:\d{2}(?:\.\d+)?", "[time]", text or "")
+
+
+def background_block(memory: dict) -> str:
+    """BACKGROUND section: slim rolling STATE history (v2.1).
+
+    Time-blind and verbatim-free: the model sees at most the last
+    RECENT_CAP one-sentence STATE updates + the last non-idle state +
+    phase trail + active flags. No full reports, no timestamps, no
+    instrument lists to copy from — this is the echo-hallucination fix.
+
+    Legacy snapshots (prev_report / running_summary) are ignored: only
+    the slim keys are rendered. Callers migrate via memory.migrate_memory.
+    """
+    # Defensive: tolerate legacy snapshots without migration.
+    recent = memory.get("recent_states") or []
+    trail = memory.get("phase_trail") or []
+    flags = memory.get("flags") or []
+    last_ni = memory.get("last_nonidle_state") or {}
+    # Legacy fallback: if no slim history but a legacy summary exists,
+    # carry a single truncated line (timestamp-stripped) so very old
+    # resume chains are not totally blind. Verbatim reports are never used.
+    lines: list[str] = []
+    if trail:
+        lines.append(f"Phase trail: {' -> '.join(trail)}")
+    if recent:
+        lines.append("Recent progression (context only, not current evidence):")
+        n = len(recent)
+        for i, rs in enumerate(recent[-4:]):
+            try:
+                ph = str(rs.get("phase", "?"))
+                st = strip_timestamps(str(rs.get("state", "")))[:300]
+                # Position, not chunk-id — chunk-id shapes are an echo
+                # vector for small RL-tuned models (degenerate loops).
+                pos = ("most recent" if i == len(recent[-4:]) - 1
+                       else f"{n - len(recent[-4:]) + i + 1} chunks ago")
+                lines.append(f"  * {ph} ({pos}): {st}")
+            except Exception:
+                continue
+    elif memory.get("running_summary"):
+        lines.append("Earlier summary: "
+                     + strip_timestamps(str(memory["running_summary"]))[-400:])
+    if last_ni and isinstance(last_ni, dict) and last_ni.get("state"):
+        # Only repeat when it is not already the most recent entry.
+        if not recent or last_ni.get("chunk_id") != recent[-1].get("chunk_id"):
+            lines.append("Last active (non-idle) state: "
+                         f"{last_ni.get('phase')}: "
+                         + strip_timestamps(str(last_ni.get('state')))[:300])
+    if flags:
+        safe = [f if isinstance(f, str) else json.dumps(f) for f in flags]
+        lines.append("Known event flags: " + "; ".join(safe))
+    if not lines:
         return "BACKGROUND: none — this is the first chunk of the surgery."
-    return "BACKGROUND (context only, not current evidence):\n" + "\n\n".join(bg)
+    return ("BACKGROUND (earlier chunks — context only, "
+            "never current visual evidence):\n" + "\n".join(lines))

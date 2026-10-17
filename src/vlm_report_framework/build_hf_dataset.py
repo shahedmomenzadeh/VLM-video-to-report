@@ -52,7 +52,9 @@ tags: [surgery, cataract, surgical-video, report-generation]
 Frozen video chunks of 25 cataract surgeries with phase timestamps,
 YOLO instrument detections, and teacher-VLM reference reports — the Part I
 dataset of the VLM-video-to-report framework
-(https://github.com/shahedmomenzadeh/VLM-video-to-report).
+(https://github.com/shahedmomenzadeh/VLM-video-to-report). Generated with
+pipeline v2.1 (time-blind prompts, code-rendered reports, slim causal
+memory).
 
 Each surgery is split into phase chunks. Every chunk has: the clip
 (`clips/`), phase label (`timelines/`), instrument tiers from a YOLO
@@ -62,8 +64,8 @@ causal memory (`teacher_reports/`, `memory/`).
 `chunks.parquet` is the master index (one row per chunk); `splits.json`
 assigns whole videos to train/validation/test (no chunk leakage).
 Intended downstream use (not included here): run candidate VLMs on identical
-`clips/` under video-only / phase-informed / phase+instrument-informed
-conditions and score them against the teacher reports.
+`clips/` under two context settings (video only; video + phase + instrument
+proposals) and score them against the teacher reports.
 
 ## How this dataset was generated
 
@@ -88,36 +90,42 @@ exceeds 240 s. Result: 849 chunks across 25 videos.
 
 **Stage 4 — Teacher reports.** Each chunk is cut frame-accurately with
 ffmpeg, sent as a single base64 MP4 to a teacher VLM
-(`ag/gemini-3.8-flash`, temperature 0.2, ≤1024 tokens), and prompted with
-chunk time window + phase + instrument tiers + memory (below). The model
-must return JSON with `report` (Phase / Observed instruments / Candidate
-but not confirmed / Anatomy visible / Actions-events), `memory_update`
-(compressed state for the next chunk), and `flags_add` (persistent event
-tags). Candidate instruments are always worded as unverified ("candidate",
-never "definitely present"). Totals: 849/849 non-empty section-valid
-reports, ~3.2M tokens.
+(`ag/gemini-3.8-flash`, temperature 0.2, ≤1024 tokens) with a time-blind
+prompt (chunk duration only — never wall-clock times), carrying the phase,
+the instrument tiers, and the memory state (below). The model returns
+structured JSON fields only — `phase_id`, `instruments_visible` /
+`instruments_uncertain` (subsets of a closed 10-class vocabulary),
+`anatomy` (closed 8-term vocabulary), 1–5 `actions` bullets,
+`memory_update`, and `flags_add` — and code renders the fixed five-section
+wire text (Phase / Observed instruments / Candidate but not confirmed /
+Anatomy visible / Actions-events) with all timestamps attached by code, so
+headers and times can never drift or be invented. Candidate instruments are
+always worded as unverified ("candidate", never "definitely present").
+Schema violations trigger correction retries. Totals: 849/849 schema-valid
+reports, ≈3.1M teacher tokens; per-chunk usage is archived (see
+`chunks.parquet` columns).
 
 ## Memory system
 
 Memory M(i,j) is built causally in temporal order — one dict per video,
-updated once per chunk from that chunk's own outputs:
+advancing once per chunk from that chunk's own outputs (v2.1 slim schema,
+timestamp-free):
 
-- `running_summary`: compressed state, one model-written sentence per
-  chunk, tail-capped at ~1600 chars (full history, lossy).
-- `prev_report`: verbatim report of the immediately previous chunk,
-  Idle or not (exact recent context, one chunk).
-- `prev_nonidle_report`: verbatim report of the most recent NON-IDLE
-  chunk (scan-back: Idle chunks carry it forward). When the previous
-  chunk is Idle, the prompt shows both verbatim blocks, explicitly
-  labeled as transition vs substantive-action context.
+- `recent_states`: rolling list (max 4) of `{chunk_id, phase, state}` — the
+  model's own one-sentence end-of-chunk summary.
+- `last_nonidle_state`: the most recent non-Idle state, pinned separately so
+  Idle gaps cannot push away the last substantive action.
 - `phase_trail`: last 10 phase ids (Idle included).
-- `instruments_seen`: class → last chunk id; Idle chunks never overwrite it.
+- `instruments_seen`: class → last chunk id; seeded only from the observed
+  detector tier, never from model text.
 - `flags`: append-only deduplicated event tags.
 - `same_phase_continuation`: transient flag triggering a "describe what
   CHANGED" note for split-phase continuations.
 
-Every step is snapshotted (`memory/<VID>_memory.jsonl`), so the full
-memory trajectory is reproducible from chunk 1.
+Verbatim previous reports are deliberately not carried forward (they invited
+echo; the full-video timeline is code-owned). Every step is snapshotted
+(`memory/<VID>_memory.jsonl`), so the full memory trajectory is reproducible
+from chunk 1.
 
 ## Splits and license
 

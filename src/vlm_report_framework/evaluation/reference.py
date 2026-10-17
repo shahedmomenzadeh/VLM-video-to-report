@@ -7,8 +7,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from clean_instruments import EXPECTED  # noqa: E402
+from prompt_base import ANATOMY_TERMS  # noqa: E402
 
 CLASSES = sorted({c for s in EXPECTED.values() for c in s} | {"Forceps"})
+# Anatomy is a closed 8-term vocabulary rendered with display names in both
+# teacher and student wire texts (e.g. "anterior chamber", "conjunctiva/eyelids").
+ANATOMY_CLASSES = sorted(ANATOMY_TERMS.values())
 SYN = {  # only genuinely equivalent terms
     "i/a probe": "I-A-Handpiece", "i-a probe": "I-A-Handpiece",
     "irrigation": "I-A-Handpiece", "aspiration": "I-A-Handpiece",
@@ -39,13 +43,16 @@ def canon_set(text: str) -> set[str]:
     for k, v in SYN.items():
         if k in t:
             found.add(v)
-    for c in CLASSES:
+    for c in CLASSES + ANATOMY_CLASSES:
         if c.lower() in t:
             found.add(c)
     return found
 
 
 def prf(pred: set[str], ref: set[str]) -> dict:
+    if not pred and not ref:
+        # agreeing that a section is empty is a perfect match
+        return {"p": 1.0, "r": 1.0, "f1": 1.0, "tp": 0, "n_pred": 0, "n_ref": 0}
     tp = len(pred & ref)
     p = tp / max(1, len(pred))
     r = tp / max(1, len(ref))

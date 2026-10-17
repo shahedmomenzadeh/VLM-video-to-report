@@ -1,17 +1,14 @@
-"""Prompt construction for Part II candidate reports (3 settings).
+"""Prompt construction for Part II candidate reports, v2.1 tagged-text contract.
 
-Settings (same frozen chunk C(i,j) in all three):
+Settings (same frozen chunk C(i,j) in both):
   s1: video only                    -> R_video
-  s2: video + phase P(i)            -> R_phase
   s3: video + phase P(i) + instruments I(i,j) -> R_phase+instrument
 
-Shared blocks (labels, background, formatting) live in prompt_base.py.
-Memory M(i,j) is chained per (model, setting, video) from the candidate's OWN
-previous outputs: running_summary + prev_report always; phase_trail uses the
-given phase for s2/s3 and the model's stated phase (best-effort parse) for
-s1; instruments_seen is populated only for s3, where the observed tier is
-given — for s1/s2 the model's self-reported instruments are unverifiable,
-so seeding memory with them would corrupt the chain.
+v2.1: students write SIMPLE TAGGED PLAIN TEXT (no JSON, no timestamps).
+Python (report_render.parse_student_tags) canonicalizes tool/anatomy names
+and renders the canonical 5-section wire text, so eval headers stay
+byte-identical. Time-blind: prompts carry duration only, never MM:SS.
+Memory is the slim rolling STATE history (see memory.py).
 """
 from __future__ import annotations
 
@@ -21,21 +18,25 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from prompt_base import (  # noqa: E402
+    ANATOMY_TERMS,
+    INSTRUMENT_LABELS,
+    PHASE_NAMES,
     background_block,
-    fmt_time,
-    instrument_block,
+    candidate_block,
 )
 
 SYSTEM_PROMPT = """You are a factual describer of cataract surgery video.
-Describe ONLY what is visually supported in the CURRENT video chunk:
-actions, instruments, anatomy, and important events.
-Do NOT invent instruments, actions, or events that are not visible.
+Describe ONLY what is visually supported in the CURRENT video chunk.
+Do NOT invent instruments, actions, anatomy, or events that are not visible.
+Do NOT explain intent or mechanisms (no "to ...", no "using energy").
+Write plain tagged lines (no JSON, no markdown headers).
+Never write timestamps or time windows — they are added by code.
 BACKGROUND about earlier chunks is context only: use it to judge whether an
 action is starting vs. continuing, never describe it as if visible now."""
 
-SAFEGUARD = """Candidate instruments come from an auxiliary perception model
-that is imperfect — never assume a listed instrument is present; verify
-visually before reporting it."""
+SAFEGUARD = """The instrument proposals below come from an imperfect auxiliary
+detector: every entry is an UNCONFIRMED PROPOSAL, never a fact. List a tool
+under TOOLS only if you clearly see it in the current chunk."""
 
 PHASE_LIST = ("P01-Incision, P02-Viscoelastic, P03-Capsulorhexis, "
               "P04-Hydrodissection, P05-Phacoemulsification, "
@@ -44,37 +45,56 @@ PHASE_LIST = ("P01-Incision, P02-Viscoelastic, P03-Capsulorhexis, "
               "P10-Viscoelastic Suction, P11-Anterior Chamber Flushing, "
               "P12-Tonifying-Antibiotics, P13-Idle.")
 
-REPORT_CONTRACT = """Respond with ONLY a JSON object, no other text. It must have
-exactly these keys:
-- "report": a single PLAIN-TEXT string (never a nested JSON object),
-  using exactly these labeled lines in this order:
-  Phase: <phase id and name, time window>
-  Observed instruments: <instruments clearly visible, one per line;
-    use "None clearly visible" if applicable>
-  Candidate but not confirmed: <weak/trace detections, verified against video;
-    use "None" if nothing>
-  Anatomy visible: <cornea, pupil, lens/capsule, etc.>
-  Actions/events: <factual visual description of what occurs>
-- "memory_update": one or two sentences of compressed state for the NEXT
-  chunk (what changed / what persists at chunk end, e.g. flap state,
-  fragment volume, lens position). Empty string if nothing carries over.
-- "flags_add": list of persistent event tags like
-  "capsule_flap_torn@P03_o01". Empty list if none.
+ALLOWED_ANATOMY = sorted(ANATOMY_TERMS)
+ALL_INSTRUMENTS = sorted(INSTRUMENT_LABELS)
 
-Example response (for a different chunk — follow the shape, not the content):
-{
-  "report": "Phase: P01 (Incision), 00:57.00-01:03.10\\nObserved instruments: tissue forceps [Forceps]\\nCandidate but not confirmed: None\\nAnatomy visible: cornea, pupil, iris\\nActions/events: The primary knife creates a clear corneal incision while tissue forceps stabilize the globe. No intraocular entry yet.",
-  "memory_update": "Clear corneal incision made; globe stabilized with forceps, no intraocular entry yet.",
-  "flags_add": []
-}"""
+STUDENT_CONTRACT_S1 = """Write your answer as plain tagged lines, exactly these tags:
+PHASE: <P01..P13 id only, e.g. P05> (state the phase you see)
+TOOLS: <comma-separated tools clearly visible, or none>
+UNCERTAIN_TOOLS: <comma-separated tools with weak/trace support, or none>
+ANATOMY: <comma-separated structures clearly visible and relevant, or none>
+EVENTS:
+- <1-5 short factual bullets, one observable action each, no timestamps>
+- <if you see an irregularity actually visible here (capsule tear, iris
+  trauma, bleeding, lens instability, slippage), describe it HERE as a bullet>
+STATE: <one sentence: what changed / persists at chunk end, for next chunk>
+FLAGS: <persistent event tags like capsule_flap_torn, or none>
 
-_PHASE_RE = re.compile(r"Phase:\s*(P\d{2})", re.IGNORECASE)
+Rules: plain instrument names are fine (code maps them); never write
+timestamps, phase names, headers, or JSON; keep bullets short."""
+
+STUDENT_CONTRACT_S3 = """Write your answer as plain tagged lines, exactly these tags
+(do NOT write a PHASE line — code already knows the phase):
+TOOLS: <comma-separated tools clearly visible, or none>
+UNCERTAIN_TOOLS: <comma-separated tools with weak/trace support, or none>
+ANATOMY: <comma-separated structures clearly visible and relevant, or none>
+EVENTS:
+- <1-5 short factual bullets, one observable action each, no timestamps>
+- <if you see an irregularity actually visible here (capsule tear, iris
+  trauma, bleeding, lens instability, slippage), describe it HERE as a bullet>
+STATE: <one sentence: what changed / persists at chunk end, for next chunk>
+FLAGS: <persistent event tags like capsule_flap_torn, or none>
+
+Rules: plain instrument names are fine (code maps them); never write
+timestamps, phase names, headers, or JSON; keep bullets short."""
+
+_PHASE_RE = re.compile(r"^PHASE\s*:\s*(P\d{2})", re.I | re.M)
 
 
 def stated_phase(report: str) -> str:
-    """Best-effort parse of the model's own Phase line (s1 memory trail)."""
+    """Best-effort parse of the student's own phase (s1 memory trail).
+
+    v2.1: reads the PHASE: tag; falls back to legacy v2 "phase_id" JSON
+    and v1 "Phase: PXX" lines for old rows.
+    """
     m = _PHASE_RE.search(report or "")
-    return m.group(1).upper() if m else "P??"
+    if m:
+        return m.group(1).upper()
+    m2 = re.search(r'"phase_id"\s*:\s*"(P\d{2})"', report or "", re.I)
+    if m2:
+        return m2.group(1).upper()
+    m3 = re.search(r"Phase:\s*(P\d{2})", report or "", re.I)
+    return m3.group(1).upper() if m3 else "P??"
 
 
 def build_candidate_prompt(
@@ -85,44 +105,56 @@ def build_candidate_prompt(
     memory: dict,
     total_frames: int,
 ) -> str:
-    assert setting in ("s1", "s2", "s3"), setting
-    t0, t1 = fmt_time(chunk["t_start"]), fmt_time(chunk["t_end"])
-    parts = [f"CURRENT CHUNK: {t0}-{t1} of a cataract surgery."]
+    assert setting in ("s1", "s3"), setting
+    dur = chunk["t_end"] - chunk["t_start"]
+    parts = [f"CURRENT CHUNK: duration {dur:.1f}s of a cataract surgery."]
     if setting == "s1":
         parts.append(
             "No phase or instrument information is provided. Identify the "
-            "surgical phase yourself from the video and state it in the "
-            "Phase line as 'Phase: PXX (Name), <time window>' using one of: "
-            + PHASE_LIST
+            "surgical phase yourself from the video and state it as "
+            "PHASE: <id> using one of: " + PHASE_LIST
         )
     else:
-        parts.append(f"Known surgical phase: {chunk['phase']} ({chunk['phase_name']}).")
+        parts.append(f"Known surgical phase: {chunk['phase']} ({chunk['phase_name']}). "
+                     "Do NOT write a PHASE line (code already knows it).")
         if memory.get("same_phase_continuation"):
             parts.append(
                 "NOTE: this chunk continues the SAME phase as the previous chunk. "
-                "Emphasize what CHANGED vs. the previous chunk (progress, instrument "
-                "state, anatomy state) rather than re-describing the setup."
+                "Report only what STARTED, ENDED, or CHANGED in this chunk; "
+                "one bullet for steady continuation at most."
             )
     parts.append(background_block(memory))
     if setting == "s3":
         parts.append(SAFEGUARD)
+        for r in observed:
+            r["hint"] = "strong"
+        for r in weak:
+            r["hint"] = "weak"
+        rows = list(observed) + list(weak)
         parts.append(
-            "Candidate instruments detected by an auxiliary perception model "
-            f"in this chunk ({total_frames} frames analyzed):"
+            "Unconfirmed instrument proposals from the auxiliary detector "
+            f"in this chunk ({total_frames} frames analyzed). Verify visually:"
         )
-        if observed:
-            parts.append("Observed (strong evidence, phase-plausible):\n"
-                         + instrument_block(observed))
+        if rows:
+            parts.append(candidate_block(rows))
         else:
-            parts.append("Observed (strong evidence, phase-plausible): none.")
-        if weak:
-            parts.append("Candidate but not clearly confirmed "
-                         "(weak/trace detections — verify visually, "
-                         "do not assume present):\n" + instrument_block(weak))
-        else:
-            parts.append("Candidate but not clearly confirmed: none.")
-        if not observed and not weak:
-            parts.append("No instruments met the detection threshold in this chunk. "
-                         "Describe anatomy and state only; do not invent tools.")
-    parts.append(REPORT_CONTRACT)
+            parts.append("No proposals in this chunk: answer TOOLS: none.")
+    else:
+        parts.append(
+            "No instrument information is provided. Name only tools you "
+            "clearly see (official list: " + ", ".join(ALL_INSTRUMENTS) + ")."
+        )
+    parts.append(STUDENT_CONTRACT_S1 if setting == "s1" else STUDENT_CONTRACT_S3)
     return "\n\n".join(parts)
+
+
+def allowed_instruments(setting: str, observed: list[dict],
+                        weak: list[dict]) -> set[str]:
+    """Reference vocabulary for this (setting, chunk) — informational only.
+
+    v2.1 students are NOT validated against this (no retries); the
+    normalizer in report_render maps natural names in code.
+    """
+    if setting == "s3":
+        return {r["class_name"] for r in list(observed) + list(weak)}
+    return set(INSTRUMENT_LABELS)

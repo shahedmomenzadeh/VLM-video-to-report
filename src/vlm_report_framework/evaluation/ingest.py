@@ -23,7 +23,7 @@ def discover_tags() -> list[str]:
     for p in CAND.iterdir():
         if not p.is_dir():
             continue
-        if any((p / s).is_dir() for s in ("s1", "s2", "s3")):
+        if any((p / s).is_dir() for s in ("s1", "s3")):
             out.append(p.name)
     return sorted(out)
 
@@ -69,7 +69,7 @@ def inventory(videos: list[str] | None = None,
             continue
         teacher = load_teacher(vid)
         for tag in tags:
-            for setting in ("s1", "s2", "s3"):
+            for setting in ("s1", "s3"):
                 mp = CAND / tag / setting / f"{vid}_reports.jsonl"
                 rows, dupes = load_master(mp)
                 got = [r.get("chunk_id") for r in rows]

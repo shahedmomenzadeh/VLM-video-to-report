@@ -16,9 +16,23 @@ import statistics
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from evaluation import ingest  # noqa: E402
-from run_state import REPO  # noqa: E402
+REPO = Path(__file__).resolve().parent.parent.parent.parent
+
+TEACHER_DIR = REPO / "output-teacher"
+
+
+def load_teacher(vid: str) -> dict:
+    """Read teacher reports master directly (avoids ingest's pandas dep)."""
+    p = TEACHER_DIR / f"{vid}_teacher_reports.jsonl"
+    out = {}
+    if p.exists():
+        for line in open(p):
+            try:
+                r = json.loads(line)
+                out[r.get("chunk_id", "")] = r
+            except Exception:
+                pass
+    return out
 
 CAND = REPO / "output-candidates"
 TAGS = ["hulumed-4b", "hulumed-7b", "lingshu-7b", "qwen3vl-2b-grpo",
@@ -35,10 +49,40 @@ def chunk_rows(tag: str, setting: str, vid: str) -> list[dict]:
     return rows
 
 
+def load_raw(tag: str, setting: str, vid: str, cid: str) -> dict:
+    p = CAND / tag / setting / "reports" / f"{vid}__{cid}.json"
+    if not p.exists():
+        return {}
+    try:
+        d = json.load(open(p))
+        raw = d.get("raw_response", "")
+        return {"prompt": (d.get("prompt") or "")[:1500],
+                "raw": (json.dumps(raw, indent=1) if isinstance(raw, dict)
+                        else str(raw or ""))[:1500]}
+    except Exception:
+        return {}
+
+
+def load_teacher_mem(vid: str) -> dict:
+    p = REPO / "hf_dataset" / "memory" / f"{vid}_memory.jsonl"
+    out = {}
+    if p.exists():
+        for line in open(p):
+            try:
+                r = json.loads(line)
+                mem = r.get("memory_after", {}) or {}
+                out[r.get("chunk_id", "")] = mem.get("running_summary", "")
+            except Exception:
+                pass
+    return out
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--run-id", default="full25")
     ap.add_argument("--out", default="")
+    ap.add_argument("--with-raw", action="store_true",
+                    help="embed truncated prompt/raw-response per chunk")
     a = ap.parse_args()
     ev = REPO / "output-evaluation" / a.run_id
     out = Path(a.out) if a.out else ev / "viewer.html"
@@ -56,8 +100,9 @@ def main() -> None:
                     "worst": r.get("rows", []) or []}
             except Exception:
                 pass
-    # temporal per chain: "tag.setting.vid" -> counts
+    # temporal per chain + per-chunk incoming-transition map
     temporal: dict = {}
+    tin: dict = {}
     td = ev / "transitions_t1"
     if td.exists():
         for f in td.glob("*.json"):
@@ -70,8 +115,28 @@ def main() -> None:
                     "contam": sum(1 for t in tr if t.get("contamination")),
                     "stale": sum(1 for t in tr if t.get("stale_instrument")),
                     "redun": sum(1 for t in tr if t.get("redundant"))}
+                for t in tr:
+                    tin[(d["tag"], d["setting"], d["video_id"],
+                         t.get("curr", ""))] = {
+                        "prev": t.get("prev"), "contr": t.get("contradiction"),
+                        "contam": t.get("contamination"),
+                        "stale": t.get("stale_instrument"),
+                        "redun": t.get("redundant"),
+                        "prog": t.get("progression"), "why": t.get("why", "")}
             except Exception:
                 pass
+    # video-grounded judge rows: (tag, setting, vid, chunk) -> verdict
+    jrows: dict = {}
+    jd_dir = ev / "judgments"
+    if jd_dir.exists():
+        for f in jd_dir.glob("*.jsonl"):
+            for line in open(f):
+                try:
+                    r = json.loads(line)
+                    jrows[(r.get("tag"), r.get("setting"), r.get("video_id"),
+                           r.get("chunk_id"))] = r
+                except Exception:
+                    pass
     # dashboard means
     dash_det: dict = {}
     vs_path = ev / "video_scores.jsonl"
@@ -91,8 +156,6 @@ def main() -> None:
                 "instrF1": m(lambda x: (x["all"]["instr_f1"]["mean"] or 0)),
                 "echo": m(lambda x: x["echo_rate"])}
     dash_t1: dict = {}
-    for (tag, s, _v, _c), _ in claims.items():
-        pass
     by_src: dict = {}
     for (tag, s, _v, _c), c in claims.items():
         if c["sup"] is not None:
@@ -102,16 +165,52 @@ def main() -> None:
                         for k, k2 in (("sup", "sup"), ("contra", "contra"),
                                        ("unass", "unass"))}
         dash_t1[src]["n"] = len(cc)
+    # comparisons.json: panels / contrasts / phase_s1 (+ judge panels)
+    panels: dict = {}
+    contrasts: dict = {}
+    phase_s1: dict = {}
+    panels_j: dict = {}
+    contrasts_j: dict = {}
+    cmp_path = ev / "comparisons.json"
+    if cmp_path.exists():
+        try:
+            cj = json.load(open(cmp_path))
+            panels = cj.get("panels", {})
+            contrasts = cj.get("contrasts", {})
+            phase_s1 = cj.get("phase_s1", {})
+            panels_j = cj.get("panels_j", {})
+            contrasts_j = cj.get("contrasts_j", {})
+        except Exception:
+            pass
+    # temporal_t1.json global aggregates
+    temp_agg: dict = {}
+    ta_path = ev / "temporal_t1.json"
+    if ta_path.exists():
+        try:
+            temp_agg = json.load(open(ta_path))
+        except Exception:
+            pass
 
-    # per-video payload (reports + claim badges + tiers)
+    # per-video payload (reports + claim badges + tiers + evidence + temporal)
     videos: dict = {}
     for vid in vids:
-        teach = ingest.load_teacher(vid)
+        teach = load_teacher(vid)
+        tmem = load_teacher_mem(vid)
+        evmap: dict = {}
+        for f in (ev / "evidence").glob(f"{vid}__*.json"):
+            try:
+                d = json.load(open(f))
+                evmap[d.get("chunk_id", f.stem)] = {
+                    k: d.get(k) for k in ("visible_instruments", "anatomy",
+                                          "actions", "state_changes", "uncertain")}
+            except Exception:
+                pass
         entry: dict = {"teacher": {}, "models": {}}
         for cid, t in teach.items():
             entry["teacher"][cid] = {"report": t.get("report", ""),
                                      "phase": t.get("phase"),
-                                     "t": [t.get("t_start"), t.get("t_end")]}
+                                     "t": [t.get("t_start"), t.get("t_end")],
+                                     "mem": tmem.get(cid, "")}
         for tag in TAGS:
             entry["models"][tag] = {}
             for s in SETTINGS:
@@ -119,96 +218,44 @@ def main() -> None:
                 for r in chunk_rows(tag, s, vid):
                     cid = r.get("chunk_id", "?")
                     c = claims.get((tag, s, vid, cid), {})
+                    j = jrows.get((tag, s, vid, cid), {})
+                    raw = load_raw(tag, s, vid, cid) if a.with_raw else {}
                     chunks.append({
                         "cid": cid, "phase": r.get("phase"),
+                        "phase_name": r.get("phase_name"),
+                        "stated": r.get("stated_phase"),
                         "t": [r.get("t_start"), r.get("t_end")],
                         "report": r.get("report", ""),
+                        "memup": r.get("memory_update", ""),
                         "tiers": r.get("tiers_given"),
                         "frames": r.get("n_frames_used"),
+                        "lat": r.get("latency_s"),
+                        "jacc": j.get("accuracy"), "jcov": j.get("coverage"),
+                        "jissues": j.get("issues") or [],
+                        "junass": j.get("unassessable") or [],
+                        "jerr": j.get("error"),
                         "sup": c.get("sup"), "contra": c.get("contra"),
-                        "worst": (c.get("worst") or [])[:3]})
+                        "unass": c.get("unass"), "ncl": c.get("n"),
+                        "worst": (c.get("worst") or [])[:3],
+                        "ev": evmap.get(cid),
+                        "tin": tin.get((tag, s, vid, cid)),
+                        "prompt": raw.get("prompt"),
+                        "rawresp": raw.get("raw")})
                 entry["models"][tag][s] = chunks
         videos[vid] = entry
 
-    payload = {"videos": videos, "tags": TAGS, "dash_det": dash_det,
-               "dash_t1": dash_t1, "temporal": temporal, "run_id": a.run_id}
-    data_js = json.dumps(payload)
-    h = lambda s: html.escape(s or "")
-    det_rows = "".join(
-        f"<tr><td>{h(s)}</td><td>{d['videos']}</td><td>{d['rougeL']}</td>"
-        f"<td>{d['instrF1']}</td><td>{d['echo']}</td></tr>"
-        for s, d in sorted(dash_det.items()))
-    t1_rows = "".join(
-        f"<tr><td>{h(s)}</td><td>{d['n']}</td><td>{d['sup']}</td>"
-        f"<td>{d['contra']}</td><td>{d['unass']}</td></tr>"
-        for s, d in sorted(dash_t1.items()))
-
-    page = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
-<title>Eval viewer — {h(a.run_id)}</title>
-<style>
-body{{font-family:system-ui,sans-serif;margin:0;background:#111;color:#ddd}}
-header{{padding:12px 20px;background:#1c1c1c;border-bottom:1px solid #333}}
-main{{display:flex;min-height:90vh}}
-nav{{width:270px;min-width:270px;border-right:1px solid #333;padding:12px;overflow:auto}}
-section{{flex:1;padding:12px 20px;overflow:auto}}
-table{{border-collapse:collapse;font-size:12px;margin-bottom:18px}}
-td,th{{border:1px solid #444;padding:4px 8px;text-align:right}}
-td:first-child,th:first-child{{text-align:left}}
-.tabs button,.models button{{margin:2px;padding:5px 10px;background:#222;color:#ddd;border:1px solid #555;cursor:pointer}}
-.tabs button.on,.models button.on{{background:#0a5;color:#fff}}
-.chunk{{border:1px solid #333;margin:8px 0;padding:8px;background:#181818}}
-.chunk summary{{cursor:pointer}}
-pre{{white-space:pre-wrap;font-size:12px;background:#0d0d0d;padding:8px}}
-.badge{{display:inline-block;padding:1px 7px;border-radius:8px;font-size:11px;margin-left:6px}}
-.ok{{background:#0a5}}.mid{{background:#a80}}.bad{{background:#a33}}
-select{{padding:6px;font-size:14px;width:100%}}
-h2{{margin-top:26px}}small{{color:#999}}
-</style></head><body>
-<header><b>Video-report eval viewer</b> <small>run {h(a.run_id)} · 25 videos · 7 models × s1/s2/s3 + teacher · Tier-1 support/contradiction + temporal per chain</small></header>
-<main><nav>
-<h3>Video</h3><select id="vidsel" size="27" style="height:60vh"></select>
-</nav><section>
-<h2>Dashboard — teacher agreement (deterministic, 25 videos)</h2>
-<table><tr><th>source</th><th>videos</th><th>ROUGE-L</th><th>instrF1</th><th>echo</th></tr>{det_rows}</table>
-<h2>Dashboard — Tier-1 factuality (support / contradiction / unassessable)</h2>
-<table><tr><th>source</th><th>chunks</th><th>sup</th><th>contra</th><th>unass</th></tr>{t1_rows}</table>
-<h2>Responses</h2>
-<div class="models" id="mtabs"></div>
-<div class="tabs" id="stabs"></div>
-<div id="chain"></div>
-<div id="chunks"></div>
-</section></main>
-<script>const D={data_js};
-const vs=Object.keys(D.videos).sort(),tags=D.tags;
-const sel=document.getElementById('vidsel');
-vs.forEach(v=>{{const o=document.createElement('option');o.value=v;o.textContent=v;sel.appendChild(o);}});
-let curV=vs[0],curM=tags[0],curS='s3';
-function badge(x){{if(x==null)return '';const c=x>=0.5?'ok':(x>=0.3?'mid':'bad');return `<span class="badge ${{c}}">${{x}}</span>`;}}
-function renderModels(){{const el=document.getElementById('mtabs');el.innerHTML='';
-['__teacher__'].concat(tags).forEach(t=>{{const b=document.createElement('button');
-b.textContent=t==='__teacher__'?'teacher':t;if(t===curM)b.className='on';
-b.onclick=()=>{{curM=t;renderModels();renderChunks();}};el.appendChild(b);}});}}
-function renderSettings(){{const el=document.getElementById('stabs');el.innerHTML='';
-if(curM==='__teacher__')return;
-['s1','s2','s3'].forEach(s=>{{const b=document.createElement('button');b.textContent=s;
-if(s===curS)b.className='on';b.onclick=()=>{{curS=s;renderSettings();renderChunks();}};el.appendChild(b);}});}}
-function esc(s){{return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;');}}
-function renderChunks(){{const V=D.videos[curV],box=document.getElementById('chunks'),
-ch=document.getElementById('chain');box.innerHTML='';ch.innerHTML='';
-if(curM==='__teacher__'){{const ids=Object.keys(V.teacher).sort();
-box.innerHTML=ids.map(id=>{{const r=V.teacher[id];
-return `<div class="chunk"><b>${{id}}</b> <small>${{r.phase||''}} ${{r.t[0]}}-${{r.t[1]}}s</small><pre>${{esc(r.report)}}</pre></div>`;}}).join('');return;}}
-const rows=V.models[curM][curS]||[];
-const key=curM+'.'+curS+'.'+curV, T=D.temporal[curM+'.'+curS+'.'+curV];
-if(T)ch.innerHTML=`<small>chain temporal: ${{T.n}} transitions · contr ${{T.contr}} · contam ${{T.contam}} · stale ${{T.stale}} · redun ${{T.redun}}</small>`;
-box.innerHTML=rows.map(r=>{{const w=(r.worst||[]).map(x=>`<li>[${{x.verdict||'?'}}] ${{esc(x.claim||'')}} <small>${{esc(x.why||'')}}</small></li>`).join('');
-const tiers=r.tiers?`<small>tiers given: obs=${{esc(JSON.stringify(r.tiers.observed||[]))}} weak=${{esc(JSON.stringify(r.tiers.weak||[]))}} · frames=${{r.frames}}</small>`:'';
-return `<div class="chunk"><details><summary><b>${{r.cid}}</b> <small>${{r.phase||''}} ${{r.t[0]}}-${{r.t[1]}}s</small>${{badge(r.sup)}}<span class="badge bad">${{r.contra??''}}</span></summary>${{tiers}}<pre>${{esc(r.report)}}</pre>${{w?`<ul>${{w}}</ul>`:''}}</details></div>`;}}).join('');}}
-sel.onchange=()=>{{curV=sel.value;renderChunks();}};
-sel.value=curV;renderModels();renderSettings();renderChunks();
-</script></body></html>"""
+    payload = {"videos": videos, "tags": TAGS, "settings": list(SETTINGS),
+               "dash_det": dash_det, "dash_t1": dash_t1, "panels": panels,
+               "panels_j": panels_j, "contrasts": contrasts,
+               "contrasts_j": contrasts_j, "phase_s1": phase_s1,
+               "temp_agg": temp_agg, "temporal": temporal, "run_id": a.run_id,
+               "has_raw": a.with_raw}
+    data_js = json.dumps(payload).replace("</", "<\\/")
+    tpl = (Path(__file__).resolve().parent / "dashboard_template.html").read_text()
+    page = tpl.replace("__DATA__", data_js).replace("__RUN__", html.escape(a.run_id))
     out.write_text(page)
     print(f"wrote {out} ({out.stat().st_size/1e6:.1f} MB)")
+
 
 
 if __name__ == "__main__":

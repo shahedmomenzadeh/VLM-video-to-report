@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Qwen3-VL-2B-Instruct candidate sweep on Kaggle (backend: qwen3vl).
+# Qwen3-VL-2B cataract-GRPO candidate sweep on Kaggle (backend: qwen3vl).
 #
 # Run from a Kaggle notebook (GPU enabled) as:
-#   !git clone https://github.com/shahedmomenzadeh/VLM-video-to-report
+#   !git clone -b refactor-eval https://github.com/shahedmomenzadeh/VLM-video-to-report
 #   %cd VLM-video-to-report
-#   !bash kaggle_run/qwen3vl-2b-instruct.sh
+#   !bash kaggle_run/qwen3vl-2b-grpo.sh
 #
 # Knobs (env): VIDEOS (default: pilot trio; "all" for the 25-video corpus),
 #   MAX_FRAMES (default 32), OUTZIP (default /kaggle/working/<tag>-results.zip),
@@ -102,13 +102,22 @@ else
 fi
 for VID in "${VLIST[@]}"; do
 echo ">>> video: $VID"
-echo ">>> inference: $MODEL_TAG x s1,s2,s3 (video=$VID)"
+echo ">>> inference: $MODEL_TAG x s1,s3 (video=$VID)"
 python src/vlm_report_framework/candidate_reports.py \
   --backend "$BACKEND" --model "$MODEL_DIR" --model-tag "$MODEL_TAG" \
-  --videos "$VID" --settings s1,s2,s3 --max-frames "$MAX_FRAMES"
+  --videos "$VID" --settings s1,s3 --max-frames "$MAX_FRAMES"
 
 echo ">>> audit $VID"
-python src/vlm_report_framework/verify_candidates.py --model-tag "$MODEL_TAG" || true
+MODEL_TAG="$MODEL_TAG" VID="$VID" python - <<'PY'
+import os
+from pathlib import Path
+tag, vid = os.environ["MODEL_TAG"], os.environ["VID"]
+want = len(list(Path("hf_dataset/clips").glob(f"{vid}__*.mp4")))
+for s in ("s1", "s3"):
+    m = Path("output-candidates") / tag / s / f"{vid}_reports.jsonl"
+    got = sum(1 for _ in open(m)) if m.exists() else 0
+    print(f"  {s}: {got}/{want} rows" + ("" if got == want else " [partial]"))
+PY
 
 echo ">>> checkpoint zip -> $OUTZIP ($VID done)"
 rm -f "$OUTZIP"

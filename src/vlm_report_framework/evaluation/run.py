@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -24,7 +25,7 @@ def cmd_inventory(a):
 def cmd_reliability(a):
     vid = a.video
     for tag in (a.tags.split(",") if a.tags else ingest.discover_tags()):
-        for setting in ("s1", "s2", "s3"):
+        for setting in ("s1", "s3"):
             rows = reliability.audit(tag, setting, vid)
             if not rows:
                 continue
@@ -39,7 +40,7 @@ def cmd_reliability(a):
 def cmd_reference(a):
     teach = ingest.load_teacher(a.video)
     for tag in (a.tags.split(",") if a.tags else ingest.discover_tags()):
-        for setting in ("s1", "s2", "s3"):
+        for setting in ("s1", "s3"):
             mp = reliability.CAND / tag / setting / f"{a.video}_reports.jsonl"
             if not mp.exists():
                 continue
@@ -82,7 +83,7 @@ def cmd_evidence(a):
 def cmd_temporal(a):
     from evaluation import temporal as tp
     for tag in (a.tags.split(",") if a.tags else ingest.discover_tags()):
-        for setting in (a.settings.split(",") if a.settings else ("s1", "s2", "s3")):
+        for setting in (a.settings.split(",") if a.settings else ("s1", "s3")):
             rows = tp.score_transitions(tag, setting, a.video, a.run_id)
             if not rows:
                 continue
@@ -92,6 +93,59 @@ def cmd_temporal(a):
                   f"contam={sum(r['contamination'] for r in rows)} "
                   f"stale={sum(r['stale_instrument'] for r in rows)} "
                   f"redun={sum(r['redundant'] for r in rows)}")
+
+
+def cmd_judge(a):
+    """One video-grounded judge call for a single chunk (calibration/audit)."""
+    from evaluation import judge as jd
+    mp = reliability.CAND / a.tag / a.setting / f"{a.video}_reports.jsonl"
+    report = ""
+    if mp.exists():
+        for line in open(mp):
+            r = json.loads(line)
+            if r.get("chunk_id") == a.chunk:
+                report = r.get("report", "")
+                break
+    if not report:
+        print(f"no report for {a.video} {a.chunk} ({a.tag}.{a.setting})")
+        return
+    row = jd.judge_one(a.video, a.chunk, report, a.tag, a.setting, a.model)
+    if a.save and not row.get("error"):
+        jd.merge_rows(OUT_EVAL / a.run_id / "judgments" /
+                      f"{a.video}.{a.tag}.{a.setting}.jsonl", [row])
+    print(json.dumps({k: row[k] for k in
+                      ("clip_label", "report_hash", "rubric", "accuracy",
+                       "coverage", "issues", "unassessable", "error",
+                       "latency_s")}, indent=1))
+
+
+def cmd_timeline(a):
+    """Deterministic timeline check of compiled full-video reports (code only)."""
+    from clean_instruments import make_chunks
+    from evaluation import compile_self as cs
+    from run_state import load_timeline
+    vids = (a.videos.split(",") if a.videos != "all"
+            else sorted(p.name for p in Path("videos").glob("PH_*")
+                        if p.is_dir()))
+    n_ok = n_bad = n_seen = 0
+    for tag in (a.tags.split(",") if a.tags else ingest.discover_tags()):
+        for setting in a.settings.split(","):
+            for vid in vids:
+                p = cs.OUT / f"{tag}.{setting}.self" / f"{vid}.readable.md"
+                if not p.exists():
+                    continue
+                text = p.read_text()
+                chunks = make_chunks(load_timeline(vid))
+                ok, errs, spans = cs.validate(text, chunks,
+                                              cs.video_duration(vid))
+                n_seen += 1
+                n_ok += ok
+                n_bad += (not ok)
+                blocks = len(re.findall(r"^## ", text, re.M))
+                print(f"{tag}.{setting} {vid}: ok={ok} blocks={blocks} "
+                      f"spans={len(spans)}" +
+                      (f" errs={errs[:3]}" if errs else ""))
+    print(f"timeline: {n_ok}/{n_seen} ok, {n_bad} failed")
 
 
 def cmd_phase(a):
@@ -131,6 +185,12 @@ def main():
     p.add_argument("--chunk", required=True); p.add_argument("--run-id", default="pilot")
     p.add_argument("--tag", default=""); p.add_argument("--setting", default="s3")
     p.add_argument("--score", action="store_true")
+    p = sub.add_parser("judge"); p.add_argument("--video", required=True)
+    p.add_argument("--chunk", required=True); p.add_argument("--tag", required=True)
+    p.add_argument("--setting", default="s3"); p.add_argument("--run-id", default="v2slim")
+    p.add_argument("--model", default=""); p.add_argument("--save", action="store_true")
+    p = sub.add_parser("timeline"); p.add_argument("--videos", default="all")
+    p.add_argument("--tags", default=""); p.add_argument("--settings", default="s1,s3")
     p = sub.add_parser("temporal"); p.add_argument("--video", required=True)
     p.add_argument("--tags", default=""); p.add_argument("--settings", default="s3")
     p.add_argument("--run-id", default="pilot")
@@ -141,6 +201,7 @@ def main():
     a = ap.parse_args()
     {"inventory": cmd_inventory, "reliability": cmd_reliability,
      "reference": cmd_reference, "evidence": cmd_evidence,
+     "judge": cmd_judge, "timeline": cmd_timeline,
      "temporal": cmd_temporal, "phase": cmd_phase,
      "report": cmd_report}[a.cmd](a)
 

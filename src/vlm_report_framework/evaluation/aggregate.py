@@ -12,6 +12,8 @@ from clean_instruments import make_chunks  # noqa: E402
 from evaluation import ingest, reference, reliability  # noqa: E402
 from run_state import load_timeline  # noqa: E402
 
+OUT_EVAL = ingest.OUT_EVAL
+
 
 def chunk_scores(tag: str, setting: str, video_id: str) -> list[dict]:
     """Cheap deterministic per-chunk scores (reliability + reference + phase)."""
@@ -121,10 +123,104 @@ def paired_delta(videos: list[str], tag: str, set_a: str, set_b: str,
         if not common:
             continue
         diffs.append(statistics.mean([rb[c][key] - ra[c][key] for c in common]))
+    return _boot(diffs)
+
+
+# --- video-grounded judge (Eval J, ordinal 0-3) ------------------------------
+
+def judge_rows(run_id: str, tag: str, setting: str, video_id: str) -> list[dict]:
+    """Per-chunk judge scores joined with master phase info (ordinal 0-3)."""
+    mp = reliability.CAND / tag / setting / f"{video_id}_reports.jsonl"
+    if not mp.exists():
+        return []
+    master = [json.loads(l) for l in open(mp)]
+    judged: dict[str, dict] = {}
+    jp = OUT_EVAL / run_id / "judgments" / f"{video_id}.{tag}.{setting}.jsonl"
+    if jp.exists():
+        for line in open(jp):
+            try:
+                r = json.loads(line)
+            except Exception:
+                continue
+            judged[r.get("chunk_id")] = r
+    out = []
+    for r in master:
+        cid = r.get("chunk_id")
+        j = judged.get(cid, {})
+        issues = j.get("issues") or []
+        out.append({
+            "video_id": video_id, "tag": tag, "setting": setting,
+            "chunk_id": cid, "phase": r.get("phase"),
+            "is_idle": r.get("phase") == "P13",
+            "accuracy": j.get("accuracy"), "coverage": j.get("coverage"),
+            "material_issue": any(i.get("severity") == "material"
+                                  for i in issues),
+            "n_issues": len(issues),
+            "n_unassessable": len(j.get("unassessable") or []),
+            "judged": bool(j),
+            "error": j.get("error"),
+            "report_hash": j.get("report_hash"), "rubric": j.get("rubric"),
+        })
+    return out
+
+
+def judge_means(rows: list[dict]) -> dict:
+    """Means over actually-scored rows; None-safe for unjudged/errored ones."""
+    scored = [r for r in rows
+              if isinstance(r.get("accuracy"), int) and not isinstance(
+                  r.get("accuracy"), bool)
+              and isinstance(r.get("coverage"), int)]
+    if not scored:
+        return {"n": 0, "accuracy": None, "coverage": None,
+                "material_rate": None, "unassess_rate": None}
+    n = len(scored)
+    return {
+        "n": n,
+        "accuracy": round(statistics.mean([r["accuracy"] for r in scored]), 3),
+        "coverage": round(statistics.mean([r["coverage"] for r in scored]), 3),
+        "material_rate": round(sum(1 for r in scored if r["material_issue"]) / n, 3),
+        "unassess_rate": round(sum(1 for r in scored if r["n_unassessable"] > 0) / n, 3),
+    }
+
+
+def aggregate_judge_video(tag: str, setting: str, video_id: str,
+                          rows: list[dict]) -> dict:
+    """Per-video judge aggregate (all / non-idle / idle 0-3 means)."""
+    nonidle = [r for r in rows if not r["is_idle"]]
+    idle = [r for r in rows if r["is_idle"]]
+    n_ok = sum(1 for r in rows if r["judged"] and not r.get("error"))
+    return {
+        "video_id": video_id, "tag": tag, "setting": setting,
+        "n_chunks": len(rows), "n_judged": n_ok,
+        "judged_rate": round(n_ok / max(1, len(rows)), 3),
+        "all": judge_means(rows),
+        "nonidle": judge_means(nonidle),
+        "idle": judge_means(idle),
+    }
+
+
+def paired_judge_delta(videos: list[str], tag: str, run_id: str,
+                       set_a: str, set_b: str, key: str) -> dict:
+    """Judge-score contrast (chunk-matched per video) + bootstrap CI."""
+    diffs = []
+    for vid in videos:
+        ra = {r["chunk_id"]: r for r in judge_rows(run_id, tag, set_a, vid)}
+        rb = {r["chunk_id"]: r for r in judge_rows(run_id, tag, set_b, vid)}
+        common = [c for c in ra if c in rb
+                  and isinstance(ra[c].get(key), int)
+                  and isinstance(rb[c].get(key), int)]
+        if not common:
+            continue
+        diffs.append(statistics.mean([rb[c][key] - ra[c][key] for c in common]))
+    return _boot(diffs)
+
+
+def _boot(diffs: list[float]) -> dict:
     if not diffs:
         return {"n_videos": 0}
     rng = random.Random(0)
-    boots = [statistics.mean([rng.choice(diffs) for _ in diffs]) for _ in range(2000)]
+    boots = [statistics.mean([rng.choice(diffs) for _ in diffs])
+             for _ in range(2000)]
     boots.sort()
     return {"n_videos": len(diffs),
             "mean_delta": round(statistics.mean(diffs), 4),

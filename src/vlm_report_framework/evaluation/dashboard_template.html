@@ -1,0 +1,393 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Eval dashboard — __RUN__</title>
+<style>
+:root{
+  --bg:#0e1116; --card:#171d27; --card2:#1c2330;
+  --line:#263042; --line2:#31405a;
+  --ink:#e8edf4; --mut:#93a0b4; --dim:#5f6b80;
+  --acc:#4cc2a8; --acc-d:#0d3d33;
+  --sup:#3ecf8e; --con:#f2555a; --una:#e8a13c;
+  --mono:ui-monospace,'Cascadia Code','JetBrains Mono',Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:14px/1.5 -apple-system,'Segoe UI',Inter,Roboto,sans-serif}
+header.top{position:sticky;top:0;z-index:50;background:#12161dee;
+  backdrop-filter:blur(8px);border-bottom:1px solid var(--line);
+  padding:10px 20px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+header.top b{font-size:15px;letter-spacing:.2px}
+header.top .meta{color:var(--mut);font-size:12px}
+header.top .sp{flex:1}
+select,input[type=text]{background:var(--card2);color:var(--ink);
+  border:1px solid var(--line2);border-radius:8px;padding:7px 10px;font-size:13px}
+select:focus,input:focus{outline:1px solid var(--acc)}
+.wrap{max-width:1460px;margin:0 auto;padding:18px 20px 60px}
+h2{font-size:13px;text-transform:uppercase;letter-spacing:1.4px;
+  color:var(--mut);margin:26px 0 10px;display:flex;align-items:center;gap:8px}
+h2 .n{color:var(--dim);font-weight:400;letter-spacing:.3px;text-transform:none}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;
+  padding:14px 16px;margin-bottom:14px}
+.hint{color:var(--dim);font-size:12px}
+table.lb{width:100%;border-collapse:collapse;font-size:12.5px}
+table.lb th{color:var(--mut);font-weight:600;text-align:right;padding:6px 8px;
+  border-bottom:1px solid var(--line2);cursor:pointer;white-space:nowrap;
+  user-select:none;font-size:11.5px}
+table.lb th:first-child,table.lb td:first-child{text-align:left}
+table.lb td{padding:6px 8px;border-bottom:1px solid var(--line);
+  text-align:right;font-family:var(--mono);font-size:12px;white-space:nowrap}
+table.lb tbody tr{cursor:pointer}
+table.lb tbody tr:hover td{background:#1e2634}
+table.lb tbody tr.sel td{background:#123b34}
+table.lb td.src{font-family:inherit;font-weight:600}
+.tagchip{display:inline-block;background:#232c3d;border:1px solid var(--line2);
+  border-radius:6px;padding:1px 7px;font-size:11.5px;margin-right:6px}
+.setchip{display:inline-block;border-radius:6px;padding:1px 7px;font-size:11.5px;
+  font-weight:700;background:#2a2417;color:#e8c56a;border:1px solid #4d4223}
+.dgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(215px,1fr));gap:10px}
+.dcard{background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 12px;font-size:12px;cursor:pointer}
+.dcard b{font-size:13px}
+.drow{display:flex;justify-content:space-between;gap:8px;padding:2px 0;color:var(--mut)}
+.drow b{font-family:var(--mono);color:var(--ink);font-weight:600;white-space:nowrap}
+.up{color:var(--sup)} .dn{color:var(--con)} .fl{color:var(--dim)}
+.bar{height:5px;border-radius:3px;background:#242d3f;margin-top:3px;overflow:hidden}
+.bar i{display:block;height:100%;border-radius:3px;background:var(--acc)}
+.pills{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0;align-items:center}
+.pills button{background:var(--card2);color:var(--ink);border:1px solid var(--line2);
+  border-radius:999px;padding:5px 13px;font-size:12.5px;cursor:pointer}
+.pills button.on{background:var(--acc-d);border-color:var(--acc);color:#c8f5e8;
+  font-weight:700}
+.pills button:hover{border-color:var(--acc)}
+.pills button.s.on{background:#3a2f10;border-color:#e8c56a;color:#ffe1a1}
+.strip{display:flex;gap:3px;overflow-x:auto;padding:10px 4px;align-items:stretch}
+.blk{min-width:34px;border-radius:6px;padding:6px 4px 5px;cursor:pointer;
+  border:1px solid transparent;border-top:4px solid var(--una);
+  background:var(--card2);text-align:center;flex-shrink:0}
+.blk:hover{border-color:var(--line2)}
+.blk.sel{outline:2px solid var(--acc);outline-offset:1px}
+.blk .p{font-size:10px;font-weight:700;font-family:var(--mono)}
+.blk .c{font-size:9.5px;color:var(--mut);font-family:var(--mono);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:90px}
+.blk .d{font-size:9px;color:var(--dim);font-family:var(--mono)}
+.blk .fl{font-size:9px;letter-spacing:.5px}
+.blk.t-contr{box-shadow:inset 0 0 0 1px var(--con)}
+.blk.t-stale{border-bottom:2px dotted var(--una)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--mut)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:4px}
+.det{display:grid;grid-template-columns:1fr 380px;gap:14px}
+@media(max-width:1100px){.det{grid-template-columns:1fr}}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line2);margin-bottom:10px;
+  flex-wrap:wrap}
+.tabs button{background:none;border:none;color:var(--mut);padding:8px 12px;
+  font-size:13px;cursor:pointer;border-bottom:2px solid transparent}
+.tabs button.on{color:var(--ink);font-weight:700;border-bottom-color:var(--acc)}
+pre.rep{white-space:pre-wrap;font-size:12.5px;background:#0b0e13;color:#d6dde8;
+  padding:12px 14px;border-radius:8px;border:1px solid var(--line);margin:0}
+pre.small{font-size:11.5px;max-height:340px;overflow:auto}
+.kv{display:grid;grid-template-columns:150px 1fr;gap:3px 10px;font-size:12.5px;
+  margin-bottom:10px}
+.kv dt{color:var(--mut)} .kv dd{margin:0;font-family:var(--mono);font-size:12px}
+.claim{border:1px solid var(--line);border-left:4px solid var(--dim);
+  border-radius:8px;padding:8px 10px;margin:7px 0;font-size:12.5px;background:var(--card2)}
+.claim.C{border-left-color:var(--con)} .claim.N{border-left-color:var(--una)}
+.claim.S{border-left-color:var(--sup)}
+.claim .v{font-size:10.5px;font-weight:700;letter-spacing:.6px;text-transform:uppercase}
+.claim.C .v{color:var(--con)} .claim.N .v{color:var(--una)} .claim.S .v{color:var(--sup)}
+.claim .why{color:var(--mut);font-size:12px}
+.evsec{font-size:12.5px}
+.evsec h4{margin:10px 0 4px;font-size:11px;text-transform:uppercase;
+  letter-spacing:1px;color:var(--dim)}
+.evsec ul{margin:2px 0;padding-left:18px}
+.evsec li{margin:1px 0}
+video{width:100%;border-radius:8px;background:#000;border:1px solid var(--line)}
+.flagrow{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}
+.fchip{font-size:11px;border-radius:6px;padding:2px 9px;font-family:var(--mono);
+  border:1px solid var(--line2);color:var(--mut)}
+.fchip.bad{color:#ffb3b6;border-color:#6e2b2e;background:#2a1518}
+.fchip.warn{color:#ffd9a0;border-color:#6e5223;background:#2a2111}
+.fchip.ok{color:#b3f0d9;border-color:#1d5c48;background:#0f2620}
+.twocol{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media(max-width:800px){.twocol{grid-template-columns:1fr}}
+.twocol h5{margin:0 0 6px;font-size:11px;text-transform:uppercase;
+  letter-spacing:1px;color:var(--dim)}
+.toggle{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;
+  color:var(--mut);cursor:pointer;user-select:none;white-space:nowrap}
+.toggle input{accent-color:var(--acc)}
+footer{color:var(--dim);font-size:11.5px;padding:20px;text-align:center}
+.num{font-family:var(--mono)}
+</style></head><body>
+<header class="top">
+  <b>Surgical report eval</b><span class="meta">run __RUN__ · 7 models × s1/s2/s3 · 25 videos</span>
+  <span class="sp"></span>
+  <input type="text" id="vsearch" placeholder="filter videos…" style="width:140px">
+  <select id="vidsel" title="video"></select>
+  <select id="msel" title="model"></select>
+  <div class="pills" id="spills" style="margin:0"></div>
+</header>
+<div class="wrap">
+
+<h2>Leaderboard <span class="n">click headers to sort · click a row to inspect that model/setting</span></h2>
+<div class="card" style="padding:6px 10px;overflow-x:auto">
+<table class="lb" id="lb"><thead><tr>
+<th data-k="src">source</th><th data-k="rougeL">ROUGE-L</th><th data-k="instrF1">instr F1</th>
+<th data-k="acc">accuracy ↑</th><th data-k="cov">coverage ↑</th><th data-k="echo">echo ↓</th>
+<th data-k="sup">support</th><th data-k="contra">contra</th>
+<th data-k="unass">unassess</th><th data-k="tcontr">chain-contr</th>
+<th data-k="contam">contam</th><th data-k="stale">stale</th><th data-k="redun">redun</th>
+<th data-k="prog">progr</th>
+</tr></thead><tbody></tbody></table>
+</div>
+<div class="hint">accuracy / coverage = video-grounded judge, anchored 0–3 quality grades (<b>3 = best, higher = better</b>; judged independently on clip + clinical content only) · support/contra/chain-* = legacy text-only audits (error rates: lower = better), kept for comparison</div>
+
+<h2>Setting progression <span class="n">paired per-video deltas, 95% bootstrap CI · s1 phase accuracy · click a card to inspect</span></h2>
+<div class="dgrid" id="deltas"></div>
+
+<h2>Video inspector <span class="n" id="inspmeta"></span></h2>
+<div class="card">
+  <div class="pills" id="mpills"></div>
+  <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:4px 0 2px">
+    <span class="hint" id="chainmeta"></span><span style="flex:1"></span>
+    <label class="toggle"><input type="checkbox" id="flagonly"> flagged chunks only</label>
+  </div>
+  <div class="strip" id="strip"></div>
+  <div class="legend">
+    <span><i style="background:var(--sup)"></i>top border = judge coverage (0–3)</span>
+    <span><i style="background:var(--con)"></i>red ring = chain contradiction (legacy)</span>
+    <span><i style="background:var(--una)"></i>amber underline = stale instrument (legacy)</span>
+    <span>A·C = accuracy · coverage · P<span class="num">1–3</span> = progression</span>
+  </div>
+</div>
+<div class="det">
+  <div class="card">
+    <div class="tabs" id="ctabs"></div>
+    <div id="cbody"></div>
+  </div>
+  <div class="card">
+    <h2 style="margin-top:0">Chunk clip</h2>
+    <video id="clip" controls preload="none"></video>
+    <div class="hint" id="clipmeta" style="margin:6px 0 10px"></div>
+    <h2>Memory carry-over</h2>
+    <pre class="rep small" id="memup"></pre>
+  </div>
+</div>
+
+</div>
+<footer>single-file dashboard · works from file:// · clips stream from ../../output-teacher/clips/</footer>
+<script>const D=__DATA__;
+"use strict";
+const $=id=>document.getElementById(id);
+const TAGS=D.tags, SETS=D.settings;
+let curV=Object.keys(D.videos).sort()[0], curM=TAGS[3]||TAGS[0], curS='s3';
+let curC=null, sortK='rougeL', sortD=-1, flagOnly=false, ctab='report';
+const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+const f3=x=>x==null?'—':Number(x).toFixed(3);
+const f2=x=>x==null?'—':Number(x).toFixed(2);
+function fillHeader(){
+  const vs=Object.keys(D.videos).sort(), vq=$('vsearch').value.trim();
+  const v=$('vidsel'); v.innerHTML='';
+  const flt=vs.filter(x=>!vq||x.includes(vq));
+  flt.forEach(x=>{
+    const o=document.createElement('option');o.value=o.textContent=x;v.appendChild(o);});
+  if(flt.length&&!flt.includes(curV)) curV=flt[0];
+  if(!D.videos[curV]) curV=vs[0];
+  v.value=curV;
+  const m=$('msel'); m.innerHTML='';
+  TAGS.forEach(t=>{const o=document.createElement('option');o.value=o.textContent=t;m.appendChild(o);});
+  m.value=curM;
+  const sp=$('spills'); sp.innerHTML='';
+  SETS.forEach(s=>{const b=document.createElement('button');b.textContent=s;
+    if(s===curS)b.className='on';b.onclick=()=>{curS=s;syncAll();};sp.appendChild(b);});
+}
+$('vsearch').oninput=fillHeader;
+$('vidsel').onchange=e=>{curV=e.target.value;curC=null;syncAll();};
+$('msel').onchange=e=>{curM=e.target.value;syncAll();};
+function lbRows(){
+  const rows=[];
+  Object.keys(D.panels).sort().forEach(src=>{
+    const p=D.panels[src]||{}, pj=D.panels_j[src]||{}, t1=D.dash_t1[src]||{},
+      det=D.dash_det[src]||{}, ta=D.temp_agg[src]||{};
+    rows.push({src, rougeL:p.rougeL??det.rougeL, instrF1:p.instrF1??det.instrF1,
+      acc:pj.accuracy, cov:pj.coverage,
+      echo:p.echo_rate??p.echo??det.echo, sup:t1.sup, contra:t1.contra, unass:t1.unass,
+      tcontr:ta.contr, contam:ta.contam, stale:ta.stale, redun:ta.redun, prog:ta.prog});
+  });
+  return rows;
+}
+function heat(k,x){
+  if(x==null) return '';
+  let c='#242d3f';
+  if(k==='rougeL'||k==='instrF1'||k==='sup'){c=x>=.5?'#0f3d31':x>=.25?'#3a3413':'#3d1a1c';}
+  if(k==='acc'||k==='cov'){c=x>=2.5?'#0f3d31':x>=1.5?'#3a3413':'#3d1a1c';}
+  if(k==='contra'||k==='tcontr'||k==='contam'||k==='stale'||k==='redun'){c=x>=.4?'#3d1a1c':x>=.15?'#3a3413':'#0f3d31';}
+  if(k==='unass'||k==='echo'){c=x>=.25?'#3a3413':x>=.1?'#2a2f1a':'#16202c';}
+  if(k==='prog'){c=x>=2.2?'#0f3d31':x>=2?'#3a3413':'#3d1a1c';}
+  return `background:${c}`;
+}
+function renderLB(){
+  const tb=document.querySelector('#lb tbody'); tb.innerHTML='';
+  const rows=lbRows().sort((a,b)=>{
+    if(sortK==='src') return sortD*(a.src<b.src?-1:1);
+    return sortD*((a[sortK]??-1)-(b[sortK]??-1));});
+  rows.forEach(r=>{
+    const tr=document.createElement('tr');
+    if(r.src===curM+'.'+curS)tr.className='sel';
+    const parts=r.src.split('.'), set=parts.pop(), tag=parts.join('.');
+    let htm=`<td class="src"><span class="tagchip">${esc(tag)}</span><span class="setchip">${esc(set)}</span></td>`;
+    ['rougeL','instrF1','acc','cov','echo','sup','contra','unass','tcontr','contam','stale','redun','prog'].forEach(k=>{
+      htm+=`<td style="${heat(k,r[k])}">${k==='prog'?f2(r[k]):f3(r[k])}</td>`;});
+    tr.innerHTML=htm;
+    tr.onclick=()=>{curM=tag;curS=set;syncAll();};
+    tb.appendChild(tr);});
+  document.querySelectorAll('#lb th').forEach(th=>{
+    const k=th.dataset.k;
+    th.textContent=th.textContent.replace(/ [▲▼]/,'')+(k===sortK?(sortD>0?' ▲':' ▼'):'');});
+}
+document.querySelectorAll('#lb th').forEach(th=>th.onclick=()=>{
+  const k=th.dataset.k;
+  if(k===sortK)sortD*=-1;else{sortK=k;sortD=k==='src'?1:-1;}
+  renderLB();});
+function renderDeltas(){
+  const el=$('deltas'); el.innerHTML='';
+  const dc=(v,inv)=>v==null?'<span class="fl">—</span>':
+    `<b class="${Math.abs(v)<0.005?'fl':(v>0?(inv?'dn':'up'):(inv?'up':'dn'))}">${v>0?'+':''}${v.toFixed(3)}</b>`;
+  TAGS.forEach(t=>{
+    const c=D.contrasts[t]||{}, acc=D.phase_s1[t];
+    const g=o=>o&&o.mean_delta!=null?o.mean_delta:null;
+    const ci=o=>o&&o.ci95?` <span class="fl num">[${o.ci95[0].toFixed(2)},${o.ci95[1].toFixed(2)}]</span>`:'';
+    const d=document.createElement('div');d.className='dcard';
+    const aVal=acc?(acc.mean_accuracy??acc.accuracy):null;
+    const cj2=D.contrasts_j[t]||{};
+    d.innerHTML=`<b>${esc(t)}</b>
+      <div class="drow"><span>rougeL s3−s1</span><span>${dc(g(c['s3-s1_rougeL']))}${ci(c['s3-s1_rougeL'])}</span></div>
+      <div class="drow"><span>instrF1 s3−s1</span><span>${dc(g(c['s3-s1_instrF1']))}${ci(c['s3-s1_instrF1'])}</span></div>
+      <div class="drow"><span>accuracy s3−s1</span><span>${dc(g(cj2['s3-s1_accuracy']))}${ci(cj2['s3-s1_accuracy'])}</span></div>
+      <div class="drow"><span>coverage s3−s1</span><span>${dc(g(cj2['s3-s1_coverage']))}${ci(cj2['s3-s1_coverage'])}</span></div>
+      <div class="drow"><span>s1 phase acc</span><span><b>${aVal==null?'—':f3(aVal)}</b></span></div>
+      <div style="margin-top:4px"><div class="bar"><i style="width:${(aVal||0)*100}%"></i></div></div>`;
+    d.onclick=()=>{curM=t;syncAll();};
+    el.appendChild(d);});
+}
+function chunks(){const V=D.videos[curV];return V?((V.models[curM]||{})[curS]||[]):[];}
+function flagged(r){
+  if(r.jacc!=null&&r.jacc<=1) return true;
+  if(r.jcov!=null&&r.jcov<=1) return true;
+  if((r.jissues||[]).some(i=>i.severity==='material')) return true;
+  return (r.contra!=null&&r.contra>=.3)||(r.tin&&(r.tin.contr||r.tin.contam||r.tin.stale));
+}
+function renderMpills(){
+  const el=$('mpills');el.innerHTML='';
+  TAGS.forEach(t=>{const b=document.createElement('button');b.textContent=t;
+    if(t===curM)b.className='on';
+    b.onclick=()=>{curM=t;syncAll();};el.appendChild(b);});
+  const sp=document.createElement('span');sp.style.flex='1';el.appendChild(sp);
+  SETS.forEach(s=>{const b=document.createElement('button');b.textContent=s;
+    if(s===curS)b.className='on s';
+    b.onclick=()=>{curS=s;syncAll();};el.appendChild(b);});
+}
+function renderStrip(){
+  const st=$('strip');st.innerHTML='';
+  let rows=chunks();
+  if(flagOnly)rows=rows.filter(flagged);
+  if(!rows.length){st.innerHTML='<span class="hint">no chunks (filter hides all)</span>';return;}
+  if(!rows.some(r=>r.cid===curC))curC=rows[0].cid;
+  const tot=rows.reduce((a,r)=>a+((r.t[1]??0)-(r.t[0]??0)||1),0);
+  rows.forEach(r=>{
+    const w=Math.max(40,((r.t[1]??0)-(r.t[0]??0))/tot*100*6);
+    const s=r.sup, tc=r.tin||{};
+    const top=(r.jcov!=null)
+      ?(r.jcov>=2.5?'var(--sup)':r.jcov>=1.5?'var(--una)':'var(--con)')
+      :(s>=.5?'var(--sup)':s>=.3?'var(--una)':'var(--con)');
+    const d=document.createElement('div');
+    d.className='blk'+(r.cid===curC?' sel':'')+(tc.contr?' t-contr':'')+(tc.stale?' t-stale':'');
+    d.style.cssText=`width:${w}px;border-top-color:${top}`;
+    const fl=[tc.contr?'!C':'',tc.contam?'!M':'',tc.stale?'!S':''].join(' ');
+    d.innerHTML=`<div class="p">${esc(r.phase||'?')}</div><div class="c">${esc(r.cid)}</div>
+      <div class="d">${r.jacc!=null?`A${r.jacc}C${r.jcov}`:f2(r.sup)}·P${tc.prog??'–'}</div><div class="fl" style="color:${fl.trim()?'var(--con)':'transparent'}">${fl.trim()||'·'}</div>`;
+    d.title=`${r.cid} acc=${r.jacc??'—'} cov=${r.jcov??'—'} sup=${f3(r.sup)} contra=${f3(r.contra)} prog=${tc.prog??'–'}`;
+    d.onclick=()=>{curC=r.cid;renderStrip();renderDetail();};
+    st.appendChild(d);});
+  const T=D.temporal[curM+'.'+curS+'.'+curV];
+  $('chainmeta').textContent=T?`${rows.length} chunks · chain: ${T.n} transitions · contr ${T.contr} · contam ${T.contam} · stale ${T.stale} · redun ${T.redun}`:`${rows.length} chunks`;
+  $('inspmeta').textContent=`${curV} · ${curM}.${curS}`;
+}
+$('flagonly').onchange=e=>{flagOnly=e.target.checked;renderStrip();};
+const CTABS=[['report','Report'],['judge','Judge'],['temp','Temporal'],['teacher','vs Teacher'],['raw','Prompt / raw']];
+function renderDetail(){
+  const r=chunks().find(x=>x.cid===curC)||chunks()[0];
+  if(!r){$('cbody').innerHTML='<span class="hint">no chunk</span>';return;}
+  curC=r.cid;
+  const tb=$('ctabs');tb.innerHTML='';
+  CTABS.forEach(([k,lbl])=>{const b=document.createElement('button');b.textContent=lbl;
+    if(k===ctab)b.className='on';b.onclick=()=>{ctab=k;renderDetail();};tb.appendChild(b);});
+  const b=$('cbody');
+  const kv=`<dl class="kv">
+    <dt>chunk</dt><dd>${esc(r.cid)} · ${esc(r.phase||'?')} ${esc(r.phase_name||'')} · ${r.t[0]}–${r.t[1]}s</dd>
+    <dt>s1 stated phase</dt><dd>${esc(r.stated||'—')}</dd>
+    <dt>tiers observed</dt><dd>${esc(JSON.stringify((r.tiers||{}).observed||[]))}</dd>
+    <dt>tiers weak</dt><dd>${esc(JSON.stringify((r.tiers||{}).weak||[]))}</dd>
+    <dt>frames / latency</dt><dd>${r.frames??'—'} frames · ${r.lat??'—'}s</dd>
+    <dt>judge (visual)</dt><dd>${r.jacc==null
+      ?(r.jerr?`error: ${esc(String(r.jerr).slice(0,80))}`:'not judged')
+      :`accuracy ${r.jacc}/3 · coverage ${r.jcov}/3`}</dd>
+    ${r.sup!=null?`<dt>legacy claims</dt><dd>sup ${f3(r.sup)} · contra ${f3(r.contra)} · unass ${f3(r.unass)} · n=${r.ncl??'—'}</dd>`:''}</dl>`;
+  if(ctab==='report'){
+    b.innerHTML=kv+`<pre class="rep">${esc(r.report)}</pre>`;
+  }else if(ctab==='judge'){
+    const jh=(r.jacc==null)
+      ?''
+      :`<div class="flagrow">
+          <span class="fchip ${r.jacc>=3?'ok':r.jacc>=2?'warn':'bad'}">accuracy ${r.jacc}/3</span>
+          <span class="fchip ${r.jcov>=3?'ok':r.jcov>=2?'warn':'bad'}">coverage ${r.jcov}/3</span>
+          ${(r.jissues||[]).some(i=>i.severity==='material')?'<span class="fchip bad">material issue</span>':''}
+          ${(r.junass||[]).length?`<span class="fchip warn">${r.junass.length} unassessable</span>`:''}</div>`;
+    const ji=(r.jissues||[]).map(i=>{
+      const k=i.severity==='material'?'C':'N';
+      return `<div class="claim ${k}"><span class="v">${esc(i.severity||'?')}</span> — ${esc(i.quote||'')}<br><span class="why">${esc(i.reason||'')}</span></div>`;}).join('');
+    const ju=(r.junass||[]).map(u=>`<li>${esc(u)}</li>`).join('');
+    const ev=r.ev;
+    const evh=ev?`<div class="evsec"><h4>legacy: candidate-blind evidence note</h4>
+      <h4>visible instruments</h4><ul>${(ev.visible_instruments||[]).map(x=>`<li>${esc(x)}</li>`).join('')||'<li>—</li>'}</ul>
+      <h4>actions</h4><ul>${(ev.actions||[]).map(x=>`<li>${esc(x)}</li>`).join('')||'<li>—</li>'}</ul></div>`:'';
+    const cl=(r.worst||[]).map(w=>{
+      const k=(w.verdict||'')[0]==='C'?'C':(w.verdict||'')[0]==='N'?'N':'S';
+      return `<div class="claim ${k}"><span class="v">${esc(w.verdict||'?')}</span> — ${esc(w.claim||'')}<br><span class="why">${esc(w.why||'')}</span></div>`;}).join('');
+    b.innerHTML=kv
+      +(r.jacc==null?`<div class="hint">${r.jerr?`judge error: ${esc(String(r.jerr).slice(0,120))}`:'not judged yet — run the judge pass for this chunk'}</div>`:jh)
+      +`<h4 style="margin:12px 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--dim)">issues</h4>`
+      +(ji||'<div class="hint">no issues flagged</div>')
+      +(ju?`<h4 style="margin:12px 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--dim)">unassessable</h4><ul>${ju}</ul>`:'')
+      +((evh||cl)?`<h4 style="margin:12px 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--dim)">legacy claims audit</h4>`:'')
+      +evh+(cl?`<div style="margin-top:6px">${cl}</div>`:'');
+  }else if(ctab==='temp'){
+    const t=r.tin;
+    b.innerHTML=kv+(t?`<div class="flagrow">
+      <span class="fchip ${t.contr?'bad':'ok'}">contradiction ${t.contr?'✕':'✓'}</span>
+      <span class="fchip ${t.contam?'bad':'ok'}">contamination ${t.contam?'✕':'✓'}</span>
+      <span class="fchip ${t.stale?'warn':'ok'}">stale-instrument ${t.stale?'✕':'✓'}</span>
+      <span class="fchip ${t.redun?'warn':'ok'}">redundant ${t.redun?'✕':'✓'}</span>
+      <span class="fchip">progression ${t.prog??'–'}</span></div>
+      <div class="hint">transition ${esc(t.prev||'?')} → ${esc(curC)}</div>
+      ${t.why?`<pre class="rep small">${esc(t.why)}</pre>`:''}`
+      :'<div class="hint">first chunk in chain — no incoming transition</div>');
+  }else if(ctab==='teacher'){
+    const t=D.videos[curV].teacher[r.cid]||{};
+    b.innerHTML=`<div class="twocol">
+      <div><h5>${esc(curM)}.${esc(curS)}</h5><pre class="rep small">${esc(r.report)}</pre></div>
+      <div><h5>teacher · ${esc(t.phase||'')}</h5><pre class="rep small">${esc(t.report||'no teacher chunk')}</pre>
+      ${t.mem?`<h5>teacher memory</h5><pre class="rep small">${esc(t.mem)}</pre>`:''}</div></div>`;
+  }else{
+    b.innerHTML=kv+(D.has_raw?`<h4 style="font-size:11px;color:var(--dim)">PROMPT (truncated)</h4>
+      <pre class="rep small">${esc(r.prompt||'not cached')}</pre>
+      <h4 style="font-size:11px;color:var(--dim)">RAW RESPONSE (truncated)</h4>
+      <pre class="rep small">${esc(r.rawresp||'not cached')}</pre>`
+      :'<div class="hint">prompt/raw not embedded — regenerate with --with-raw to enable this tab</div>');
+  }
+  const v=$('clip');
+  v.src=`../../output-teacher/clips/${curV}__${r.cid}.mp4`;
+  $('clipmeta').textContent=`${curV}__${r.cid}.mp4 · ${r.phase||''} · ${r.t[0]}–${r.t[1]}s`;
+  $('memup').textContent=r.memup||'no memory_update recorded';
+}
+function syncAll(){fillHeader();renderLB();renderDeltas();renderMpills();renderStrip();renderDetail();}
+fillHeader();renderLB();renderDeltas();renderMpills();renderStrip();renderDetail();
+</script></body></html>

@@ -64,6 +64,30 @@ def rebuild_memory(mem_path: Path, fresh: dict) -> dict:
     # tolerate snapshots written before a schema addition
     for k, v in fresh.items():
         mem.setdefault(k, v)
+    # v2.1 slim migration: drop verbatim legacy keys (echo vector), keep
+    # structural signals. Inline to avoid a circular import (memory.py is
+    # imported by callers, not here).
+    if "recent_states" not in mem:
+        out = {k: fresh.get(k) for k in
+               ("recent_states", "last_nonidle_state", "phase_trail",
+                "instruments_seen", "flags", "same_phase_continuation")}
+        out = {k: (list(v) if isinstance(v, list) else
+                   (dict(v) if isinstance(v, dict) else v))
+               for k, v in out.items() if v is not None}
+        trail = mem.get("phase_trail", [])
+        out["phase_trail"] = [t for t in trail if isinstance(t, str)][-10:] \
+            if isinstance(trail, list) else []
+        seen = mem.get("instruments_seen", {})
+        out["recent_states"] = []
+        out["last_nonidle_state"] = {}
+        out["instruments_seen"] = {k: v for k, v in seen.items()
+                                   if isinstance(k, str)} \
+            if isinstance(seen, dict) else {}
+        flags = mem.get("flags", [])
+        out["flags"] = [f if isinstance(f, str) else str(f) for f in flags
+                        if isinstance(flags, list) and (isinstance(f, str) or f)] or []
+        out["same_phase_continuation"] = False
+        return out
     return mem
 
 
@@ -101,8 +125,26 @@ def parse_json_loose(text: str) -> dict:
 
 
 def coerce_report(parsed: dict, raw: str) -> tuple[str, str, list]:
-    """Extract (report, memory_update, flags_add), coercing nested objects."""
+    """Extract (report, memory_update, flags_add), coercing nested objects.
+
+    v1: {"report": "<free text>", ...} — returned as-is.
+    v2: structured fields (phase_id/actions/...) — the caller renders and
+      stores text; this fallback returns ("", mu, flags) so validation
+      failures never silently become reports. Use coerce_report_v2 with a
+      renderer when chunk timing is available.
+    """
     try:
+        # v2 structured response without a "report" string: do NOT stringify
+        # the dict into a report; signal "needs rendering" with "".
+        if isinstance(parsed, dict) and isinstance(parsed.get("actions"), list) \
+                and "phase_id" in parsed:
+            mu = parsed.get("memory_update", "")
+            fa = parsed.get("flags_add", []) or []
+            if not isinstance(mu, str):
+                mu = str(mu)
+            if not isinstance(fa, list):
+                fa = [fa]
+            return "", mu, [f if isinstance(f, str) else str(f) for f in fa if f]
         report = parsed.get("report", "")
         memory_update = parsed.get("memory_update", "")
         flags_add = parsed.get("flags_add", []) or []

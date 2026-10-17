@@ -2,7 +2,7 @@
 # Qwen3-VL-2B family (base + SFT-stage2 + GRPO) on the 4 remaining videos.
 #
 # Run from a Kaggle notebook (GPU enabled) as:
-#   !git clone https://github.com/shahedmomenzadeh/VLM-video-to-report
+#   !git clone -b refactor-eval https://github.com/shahedmomenzadeh/VLM-video-to-report
 #   %cd VLM-video-to-report
 #   !bash kaggle_run/qwen3vl-2b-remaining.sh
 #
@@ -111,12 +111,21 @@ snapshot_download(repo_id="$MODEL_ID", local_dir="$MODEL_DIR",
 PY
   fi
   for VID in "${VLIST[@]}"; do
-    echo ">>> inference: $MODEL_TAG x s1,s2,s3 (video=$VID)"
+    echo ">>> inference: $MODEL_TAG x s1,s3 (video=$VID)"
     python src/vlm_report_framework/candidate_reports.py \
       --backend qwen3vl --model "$MODEL_DIR" --model-tag "$MODEL_TAG" \
-      --videos "$VID" --settings s1,s2,s3 --max-frames "$MAX_FRAMES"
+      --videos "$VID" --settings s1,s3 --max-frames "$MAX_FRAMES"
     echo ">>> audit $VID ($MODEL_TAG)"
-    python src/vlm_report_framework/verify_candidates.py --model-tag "$MODEL_TAG" || true
+    MODEL_TAG="$MODEL_TAG" VID="$VID" python - <<'PY'
+import os
+from pathlib import Path
+tag, vid = os.environ["MODEL_TAG"], os.environ["VID"]
+want = len(list(Path("hf_dataset/clips").glob(f"{vid}__*.mp4")))
+for s in ("s1", "s3"):
+    m = Path("output-candidates") / tag / s / f"{vid}_reports.jsonl"
+    got = sum(1 for _ in open(m)) if m.exists() else 0
+    print(f"  {s}: {got}/{want} rows" + ("" if got == want else " [partial]"))
+PY
     OUTZIP="$OUTDIR/${MODEL_TAG}-remaining.zip"
     echo ">>> checkpoint zip -> $OUTZIP ($VID done)"
     rm -f "$OUTZIP"

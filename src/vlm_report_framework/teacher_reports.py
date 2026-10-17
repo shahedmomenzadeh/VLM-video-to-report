@@ -37,6 +37,7 @@ from openai import OpenAI
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from clean_instruments import make_chunks  # noqa: E402 (reuse chunking rule)
 from memory import fresh_memory, update_memory  # noqa: E402
+from report_render import render_report, validate_struct  # noqa: E402
 from run_state import (  # noqa: E402
     REPO,
     append_master,
@@ -50,7 +51,7 @@ from run_state import (  # noqa: E402
     snapshot,
     split_tiers,
 )
-from teacher_prompt import SYSTEM_PROMPT, build_user_prompt  # noqa: E402
+from teacher_prompt import SYSTEM_PROMPT, allowed_instruments, build_user_prompt  # noqa: E402
 
 OUT = REPO / "output-teacher"
 CLIPS = OUT / "clips"
@@ -63,6 +64,7 @@ MAX_SEND_S = 240.0  # 4-min ceiling
 TEMPERATURE = 0.2
 MAX_TOKENS = 1024
 RETRIES = 3
+SCHEMA_RETRIES = 2  # extra calls on closed-vocabulary violations
 
 VIDEO_ID = "PH_0057_0239_S1"
 # Smoke test: contiguous span exercising memory across a phase boundary.
@@ -120,6 +122,39 @@ def call_vlm(client: OpenAI, prompt: str, clip: Path) -> tuple[str, dict, float]
     raise RuntimeError(f"VLM call failed after {RETRIES} tries: {last_err}")
 
 
+def accept_struct(client: OpenAI, prompt: str, clip: Path, raw: str,
+                    allowed: set[str], require_phase: str,
+                    ch: dict) -> tuple[str, dict, str, list, int]:
+    """Validate a v2 response; retry with a correction note on violations.
+
+    Returns (report_text, cleaned_fields, raw_final, flags_add, n_schema_retries).
+    Raises ValueError if still invalid after SCHEMA_RETRIES.
+    """
+    last_err = ""
+    for attempt in range(1 + SCHEMA_RETRIES):
+        try:
+            parsed = parse_json_loose(raw)
+        except (ValueError, json.JSONDecodeError, AttributeError) as e:
+            last_err = f"not valid JSON ({e})"
+            parsed = {}
+        ok, err, cleaned = validate_struct(parsed, allowed, require_phase)
+        if ok:
+            report = render_report(
+                cleaned["phase_id"], ch["t_start"], ch["t_end"],
+                cleaned["instruments_visible"],
+                cleaned["instruments_uncertain"],
+                cleaned["anatomy"], cleaned["actions"])
+            return report, cleaned, raw, cleaned["flags_add"], attempt
+        last_err = err
+        if attempt < SCHEMA_RETRIES:
+            print(f"  schema violation ({err}); correction retry "
+                  f"{attempt + 1}/{SCHEMA_RETRIES}", flush=True)
+            fix = (f"{prompt}\n\nCORRECTION REQUIRED: your previous response "
+                   f"was rejected: {err}. Return ONLY the corrected JSON object.")
+            raw, _, _ = call_vlm(client, fix, clip)
+    raise ValueError(f"schema invalid after retries: {last_err}")
+
+
 def run_video(video_id: str, chunk_ids: list[str] | None) -> None:
     segments = load_timeline(video_id)
     chunks = make_chunks(segments)
@@ -162,20 +197,24 @@ def run_video(video_id: str, chunk_ids: list[str] | None) -> None:
         print(f"  clip: {clip.name} ({clip.stat().st_size / 1e6:.1f} MB)", flush=True)
         raw, usage, dt = call_vlm(client, prompt, clip)
         print(f"  response in {dt:.0f}s, usage={usage}", flush=True)
+        allowed = allowed_instruments(obs_rows, weak_rows)
         try:
-            parsed = parse_json_loose(raw)
-            report = parsed.get("report", "")
-            memory_update = parsed.get("memory_update", "")
-            flags_add = parsed.get("flags_add", []) or []
-        except (ValueError, json.JSONDecodeError, AttributeError) as e:
-            print(f"  WARN: unparseable response ({e}); storing raw", flush=True)
+            report, cleaned, raw, flags_add, n_fix = accept_struct(
+                client, prompt, clip, raw, allowed, ch["phase"], ch)
+            memory_update = cleaned["memory_update"]
+            if n_fix:
+                print(f"  accepted after {n_fix} correction retries", flush=True)
+        except ValueError as e:
+            print(f"  WARN: {e}; storing raw", flush=True)
             report, memory_update, flags_add = raw, "", []
+            cleaned = {}
 
         (REPORTS / f"{video_id}__{cid}.md").write_text(report or raw)
         (REPORTS / f"{video_id}__{cid}.json").write_text(json.dumps(
             {"video_id": video_id, "chunk_id": cid, "chunk": ch,
              "tiers": tiers, "total_frames_est": total_frames,
              "prompt": prompt, "raw_response": raw,
+             "structured": cleaned,
              "usage": usage, "latency_s": round(dt, 1)}, indent=2))
         mem = update_memory(
             mem, ch["chunk_id"], ch["phase"], report or raw, memory_update,
@@ -187,6 +226,7 @@ def run_video(video_id: str, chunk_ids: list[str] | None) -> None:
                        "phase": ch["phase"], "phase_name": ch["phase_name"],
                        "t_start": ch["t_start"], "t_end": ch["t_end"],
                        "tiers": tiers, "report": report or raw,
+                       "structured": cleaned,
                        "memory_update": memory_update, "flags_add": flags_add,
                        "usage": usage, "latency_s": round(dt, 1)})
         print(f"  saved report ({len(report or raw)} chars)", flush=True)
